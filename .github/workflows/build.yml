@@ -1,0 +1,37 @@
+name: Build WGEKeyboardFix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Theos
+        run: |
+          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
+          echo "THEOS=~/theos" >> $GITHUB_ENV
+
+      - name: Build Tweak & Package
+        run: |
+          export THEOS=~/theos
+          make clean
+          make package FINALPACKAGE=1
+          
+      - name: Find and Copy Dylib
+        run: |
+          mkdir -p out
+          find .theos/obj/ -name "WGEKeyboardFix.dylib" -exec cp {} out/ \;
+          if [ -d "packages" ]; then
+            cp packages/*.deb out/ || true
+          fi
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: WGEKeyboardFix-Build
+          path: out/
