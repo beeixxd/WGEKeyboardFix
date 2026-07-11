@@ -4,6 +4,6 @@ Depends: mobilesubstrate
 Version: 1.0.0
 Architecture: iphoneos-arm64
 Description: Fix keyboard shadow glitch after unlock.
-Maintainer: YourName
-Author: YourName
+Maintainer: beeieed
+Author: beeieed
 Section: Tweaks
