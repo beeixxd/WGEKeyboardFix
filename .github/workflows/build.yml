@@ -1,66 +1,64 @@
-name: Build All Formats
+name: Build WGEKeyboardFix All Formats
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-14
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Build Tools
+      - name: Verify Environment
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential git curl dpkg-dev lzma liblzma-dev ccache clang-14 target-cli-fb
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-path
 
-      - name: Setup Theos
+      - name: Compile Dylib
         run: |
-          git clone --recursive https://github.com/theos/theos.git ~/theos
-          echo "THEOS=~/theos" >> $GITHUB_ENV
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          clang -dynamiclib -arch arm64 -arch arm64e -miphoneos-version-min=13.0 \
+            -isysroot "$SDK" \
+            -framework UIKit -framework Foundation \
+            -o WGEKeyboardFix.dylib WGEKeyboardFix.m
+          codesign -s - WGEKeyboardFix.dylib
 
-      - name: Setup SDK & Linux Toolchain
+      - name: Structure Output
         run: |
-          mkdir -p ~/theos/sdks
-          curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
-          tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
-          rm iPhoneOS14.5.sdk.tar.xz
-          
-          mkdir -p ~/theos/toolchain/linux/iphone
-          curl -LO https://github.com/kabiroberai/theos-toolchain-linux/releases/download/v1-13.0/toolchain-linux-arm64.tar.gz
-          tar -xf toolchain-linux-arm64.tar.gz -C ~/theos/toolchain/linux/iphone/
-          rm toolchain-linux-arm64.tar.gz
-
-      - name: Build Rootful
-        env:
-          THEOS: /home/runner/theos
-        run: |
-          make clean
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootful
           mkdir -p out
-          find .theos/obj/ -name "WGEKeyboardFix.dylib" -exec cp {} out/WGEKeyboardFix.dylib \;
-          mv packages/*.deb out/WGEKeyboardFix_rootful.deb || true
+          cp WGEKeyboardFix.dylib out/
+          cp WGEKeyboardFix.plist out/
+          
+          mkdir -p out/rootful/Library/MobileSubstrate/DynamicLibraries
+          cp WGEKeyboardFix.dylib out/rootful/Library/MobileSubstrate/DynamicLibraries/
+          cp WGEKeyboardFix.plist out/rootful/Library/MobileSubstrate/DynamicLibraries/
+          cp control out/rootful/
+          
+          mkdir -p out/rootless/var/jb/Library/MobileSubstrate/DynamicLibraries
+          cp WGEKeyboardFix.dylib out/rootless/var/jb/Library/MobileSubstrate/DynamicLibraries/
+          cp WGEKeyboardFix.plist out/rootless/var/jb/Library/MobileSubstrate/DynamicLibraries/
+          cp control out/rootless/
+          
+          mkdir -p out/roothide/var/jb/Library/MobileSubstrate/DynamicLibraries
+          cp WGEKeyboardFix.dylib out/roothide/var/jb/Library/MobileSubstrate/DynamicLibraries/
+          cp WGEKeyboardFix.plist out/roothide/var/jb/Library/MobileSubstrate/DynamicLibraries/
+          cp control out/roothide/
 
-      - name: Build Rootless
-        env:
-          THEOS: /home/runner/theos
-        run: |
-          make clean
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
-          mv packages/*.deb out/WGEKeyboardFix_rootless.deb || true
-
-      - name: Build Roothide
-        env:
-          THEOS: /home/runner/theos
-        run: |
-          make clean
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
-          mv packages/*.deb out/WGEKeyboardFix_roothide.deb || true
-
-      - name: Upload All Artifacts
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WGEKeyboardFix-All-Files
+          name: WGEKeyboardFix-Payload
           path: out/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: WGEKeyboardFix build ${{ github.run_number }}
+          files: out/WGEKeyboardFix.dylib
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
