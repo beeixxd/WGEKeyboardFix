@@ -1,4 +1,4 @@
-name: Build WGEKeyboardFix All Formats
+name: Build WGEKeyboardFix Formats
 
 on:
   workflow_dispatch:
