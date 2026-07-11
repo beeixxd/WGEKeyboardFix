@@ -22,26 +22,30 @@ jobs:
           curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
           tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
+          brew install dpkg xz lz4
 
-      - name: Build Rootful (有根)
+      - name: Build Rootful
+        env:
+          THEOS: ~/theos
         run: |
-          export THEOS=~/theos
           make clean
           make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootful
           mkdir -p out
           find .theos/obj/ -name "WGEKeyboardFix.dylib" -exec cp {} out/WGEKeyboardFix.dylib \;
           mv packages/*.deb out/WGEKeyboardFix_rootful.deb || true
 
-      - name: Build Rootless (无根)
+      - name: Build Rootless
+        env:
+          THEOS: ~/theos
         run: |
-          export THEOS=~/theos
           make clean
           make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
           mv packages/*.deb out/WGEKeyboardFix_rootless.deb || true
 
-      - name: Build Roothide (隐根)
+      - name: Build Roothide
+        env:
+          THEOS: ~/theos
         run: |
-          export THEOS=~/theos
           make clean
           make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
           mv packages/*.deb out/WGEKeyboardFix_roothide.deb || true
