@@ -14,23 +14,24 @@ jobs:
       - name: Install Build Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential binutils-common git curl dpkg-dev lzma liblzma-dev ccache
+          sudo apt-get install -y build-essential git curl dpkg-dev lzma liblzma-dev ccache clang-14 target-cli-fb
 
-      - name: Setup Theos & Toolchain
+      - name: Setup Theos
         run: |
           git clone --recursive https://github.com/theos/theos.git ~/theos
-          mkdir -p ~/theos/toolchain/linux/iphone
-          curl -LO https://github.com/theos/toolchain/releases/download/linux-arm64/linux-arm64-toolchain.tar.xz
-          tar -xf linux-arm64-toolchain.tar.xz -C ~/theos/toolchain/linux/iphone/
-          rm linux-arm64-toolchain.tar.xz
           echo "THEOS=~/theos" >> $GITHUB_ENV
 
-      - name: Setup iOS SDK
+      - name: Setup SDK & Linux Toolchain
         run: |
           mkdir -p ~/theos/sdks
           curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
           tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
+          
+          mkdir -p ~/theos/toolchain/linux/iphone
+          curl -LO https://github.com/kabiroberai/theos-toolchain-linux/releases/download/v1-13.0/toolchain-linux-arm64.tar.gz
+          tar -xf toolchain-linux-arm64.tar.gz -C ~/theos/toolchain/linux/iphone/
+          rm toolchain-linux-arm64.tar.gz
 
       - name: Build Rootful
         env:
