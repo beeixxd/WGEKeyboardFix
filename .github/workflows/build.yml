@@ -11,6 +11,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_15.0.1.app/Contents/Developer
+
       - name: Setup Theos
         run: |
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
@@ -22,6 +26,7 @@ jobs:
           curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
           tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
+          export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
           brew install dpkg xz lz4
 
       - name: Build Rootful
