@@ -4,26 +4,30 @@
 static void forceDismissKeyboard(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
-        for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+        NSArray *windows = [[UIApplication sharedApplication] windows];
+        
+        for (UIWindow *window in windows) {
             if (window.isKeyWindow) {
                 keyWindow = window;
                 break;
             }
         }
-        if (!keyWindow && [[UIApplication sharedApplication] windows].count > 0) {
-            keyWindow = [[UIApplication sharedApplication] windows] firstObject;
+        if (!keyWindow && windows.count > 0) {
+            keyWindow = [windows firstObject];
         }
         
         if (keyWindow) {
             [keyWindow endEditing:YES];
         }
         
-        for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+        for (UIWindow *window in windows) {
             NSString *windowName = NSStringFromClass([window class]);
             if ([windowName containsString:@"TextEffectsWindow"] || [windowName containsString:@"Keyboard"]) {
                 window.hidden = YES;
                 window.alpha = 0.0;
-                for (UIView *subview in [window subviews]) {
+                
+                NSArray *subviews = [window subviews];
+                for (UIView *subview in subviews) {
                     NSString *subName = NSStringFromClass([subview class]);
                     if ([subName containsString:@"Dimming"] || [subName containsString:@"Shadow"]) {
                         subview.hidden = YES;
