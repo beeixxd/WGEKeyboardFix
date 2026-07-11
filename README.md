@@ -1,3 +1,5 @@
+[![Build WGEKeyboardFix All Formats](https://github.com/beeixxd/WGEKeyboardFix/actions/workflows/build.yml/badge.svg)](https://github.com/beeixxd/WGEKeyboardFix/actions/workflows/build.yml)
+
 # WGEKeyboardFix
 
 ## 问题
