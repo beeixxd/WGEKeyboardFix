@@ -1,35 +1,65 @@
-name: Build Dylib Only
+name: Build All Formats
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Manual Setup Theos
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential binutils-common git curl dpkg-dev lzma liblzma-dev ccache
+
+      - name: Setup Theos & Toolchain
         run: |
           git clone --recursive https://github.com/theos/theos.git ~/theos
+          mkdir -p ~/theos/toolchain/linux/iphone
+          curl -LO https://github.com/theos/toolchain/releases/download/linux-arm64/linux-arm64-toolchain.tar.xz
+          tar -xf linux-arm64-toolchain.tar.xz -C ~/theos/toolchain/linux/iphone/
+          rm linux-arm64-toolchain.tar.xz
+          echo "THEOS=~/theos" >> $GITHUB_ENV
+
+      - name: Setup iOS SDK
+        run: |
           mkdir -p ~/theos/sdks
           curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
           tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
 
-      - name: Build Dylib
+      - name: Build Rootful
         env:
-          THEOS: /Users/runner/theos
+          THEOS: /home/runner/theos
         run: |
           make clean
-          make FINALPACKAGE=1
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootful
           mkdir -p out
           find .theos/obj/ -name "WGEKeyboardFix.dylib" -exec cp {} out/WGEKeyboardFix.dylib \;
+          mv packages/*.deb out/WGEKeyboardFix_rootful.deb || true
 
-      - name: Upload Artifacts
+      - name: Build Rootless
+        env:
+          THEOS: /home/runner/theos
+        run: |
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          mv packages/*.deb out/WGEKeyboardFix_rootless.deb || true
+
+      - name: Build Roothide
+        env:
+          THEOS: /home/runner/theos
+        run: |
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+          mv packages/*.deb out/WGEKeyboardFix_roothide.deb || true
+
+      - name: Upload All Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WGEKeyboardFix-Dylib
+          name: WGEKeyboardFix-All-Files
           path: out/
