@@ -1,4 +1,4 @@
-name: Build WGEKeyboardFix
+name: Build All Formats
 
 on:
   workflow_dispatch:
@@ -16,22 +16,38 @@ jobs:
           bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
           echo "THEOS=~/theos" >> $GITHUB_ENV
 
-      - name: Build Tweak & Package
+      - name: Setup SDK & Toolchain
+        run: |
+          mkdir -p ~/theos/sdks
+          curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
+          tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
+          rm iPhoneOS14.5.sdk.tar.xz
+
+      - name: Build Rootful (有根)
         run: |
           export THEOS=~/theos
           make clean
-          make package FINALPACKAGE=1
-          
-      - name: Find and Copy Dylib
-        run: |
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootful
           mkdir -p out
-          find .theos/obj/ -name "WGEKeyboardFix.dylib" -exec cp {} out/ \;
-          if [ -d "packages" ]; then
-            cp packages/*.deb out/ || true
-          fi
+          find .theos/obj/ -name "WGEKeyboardFix.dylib" -exec cp {} out/WGEKeyboardFix.dylib \;
+          mv packages/*.deb out/WGEKeyboardFix_rootful.deb || true
 
-      - name: Upload Artifacts
+      - name: Build Rootless (无根)
+        run: |
+          export THEOS=~/theos
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          mv packages/*.deb out/WGEKeyboardFix_rootless.deb || true
+
+      - name: Build Roothide (隐根)
+        run: |
+          export THEOS=~/theos
+          make clean
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
+          mv packages/*.deb out/WGEKeyboardFix_roothide.deb || true
+
+      - name: Upload All Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WGEKeyboardFix-Build
+          name: WGEKeyboardFix-All-Files
           path: out/
