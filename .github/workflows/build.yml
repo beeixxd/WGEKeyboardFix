@@ -1,4 +1,4 @@
-name: Build All Formats
+name: Build Dylib Only
 
 on:
   workflow_dispatch:
@@ -19,34 +19,17 @@ jobs:
           tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
 
-      - name: Build Rootful
+      - name: Build Dylib
         env:
           THEOS: /Users/runner/theos
         run: |
           make clean
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootful
+          make FINALPACKAGE=1
           mkdir -p out
           find .theos/obj/ -name "WGEKeyboardFix.dylib" -exec cp {} out/WGEKeyboardFix.dylib \;
-          mv packages/*.deb out/WGEKeyboardFix_rootful.deb || true
 
-      - name: Build Rootless
-        env:
-          THEOS: /Users/runner/theos
-        run: |
-          make clean
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
-          mv packages/*.deb out/WGEKeyboardFix_rootless.deb || true
-
-      - name: Build Roothide
-        env:
-          THEOS: /Users/runner/theos
-        run: |
-          make clean
-          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
-          mv packages/*.deb out/WGEKeyboardFix_roothide.deb || true
-
-      - name: Upload All Artifacts
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: WGEKeyboardFix-All-Files
+          name: WGEKeyboardFix-Dylib
           path: out/
