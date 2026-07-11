@@ -19,7 +19,7 @@ static void new_makeKeyWindow(id self, SEL _cmd) {
     orig_makeKeyWindow(self, _cmd);
 }
 
-static void (*orig_becomeKeyWindow)(id, SEL);
+static void (*orig_becomeKeyWindow)(id, SEL) ;
 static void new_becomeKeyWindow(id self, SEL _cmd) {
     if (g_logicOverrideActive) {
         return;
@@ -27,24 +27,19 @@ static void new_becomeKeyWindow(id self, SEL _cmd) {
     orig_becomeKeyWindow(self, _cmd);
 }
 
-static id (*orig_placementUndocked)(id, SEL, CGFloat);
-static id new_placementUndocked(id self, SEL _cmd, CGFloat height) {
-    if (g_logicOverrideActive) {
-        return nil;
-    }
-    return orig_placementUndocked(self, _cmd, height);
-}
-
 static void performIronCladCleanup(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
         
-        for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
+        NSArray *windows = [[UIApplication sharedApplication] windows];
+        for (UIWindow *window in windows) {
             NSString *name = NSStringFromClass([window class]);
             if ([name containsString:@"TextEffects"] || [name containsString:@"Keyboard"]) {
                 window.hidden = YES;
                 window.alpha = 0.0;
-                for (UIView *subview in [window subviews]) {
+                
+                NSArray *subviews = [window subviews];
+                for (UIView *subview in subviews) {
                     NSString *subName = NSStringFromClass([subview class]);
                     if ([subName containsString:@"Dimming"] || [subName containsString:@"Shadow"] || [subName containsString:@"Corner"]) {
                         subview.hidden = YES;
@@ -85,15 +80,6 @@ static void performIronCladCleanup(void) {
         if (m3) {
             orig_becomeKeyWindow = (void *)method_getImplementation(m3);
             method_setImplementation(m3, (IMP)new_becomeKeyWindow);
-        }
-        
-        Class placementClass = objc_getClass("UIInputViewSetPlacementUndocked");
-        if (placementClass) {
-            Method m4 = class_getClassMethod(placementClass, objc_getSelector("placementWithUndockedHeight:"));
-            if (m4) {
-                orig_placementUndocked = (void *)method_getImplementation(m4);
-                method_setImplementation(m4, (IMP)new_placementUndocked);
-            }
         }
         
         [[NSNotificationCenter defaultCenter] addObserver:observer
