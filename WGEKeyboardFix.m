@@ -1,8 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#import <notify.h>
 
-static void syncAppKeyboardState() {
+static void forceDismissKeyboard(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         UIWindow *keyWindow = nil;
         for (UIWindow *window in [[UIApplication sharedApplication] windows]) {
@@ -29,9 +28,6 @@ static void syncAppKeyboardState() {
                 if ([sharedImpl respondsToSelector:@selector(orderOutWithTrackedView:Duration:Notify:)]) {
                     [sharedImpl performSelector:@selector(orderOutWithTrackedView:Duration:Notify:) withObject:nil withObject:@(0.0) withObject:@(NO)];
                 }
-                if ([sharedImpl respondsToSelector:@selector(setInitialFrameWithConfig:)]) {
-                    [sharedImpl performSelector:@selector(minimize)];
-                }
             }
         }
         
@@ -52,17 +48,36 @@ static void syncAppKeyboardState() {
     });
 }
 
+static void (*orig_willEnterForeground)(id, SEL, id);
+static void new_willEnterForeground(id self, SEL _cmd, id notification) {
+    orig_willEnterForeground(self, _cmd, notification);
+    forceDismissKeyboard();
+    for (int i = 1; i <= 3; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            forceDismissKeyboard();
+        });
+    }
+}
+
+static void (*orig_didBecomeActive)(id, SEL, id);
+static void new_didBecomeActive(id self, SEL _cmd, id notification) {
+    orig_didBecomeActive(self, _cmd, notification);
+    forceDismissKeyboard();
+}
+
 __attribute__((constructor)) static void init() {
-    int token;
-    notify_register_dispatch("com.apple.springboard.lockstate", &token, dispatch_get_main_queue(), ^(int t) {
-        uint64_t state;
-        notify_get_state(t, &state);
-        if (state == 0) {
-            for (int i = 1; i <= 4; i++) {
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    syncAppKeyboardState();
-                });
-            }
+    Class appDelegate = objc_getClass("UIApplication");
+    if (appDelegate) {
+        Method m1 = class_getInstanceMethod(appDelegate, @selector(_applicationWillEnterForeground:));
+        if (m1) {
+            orig_willEnterForeground = (void *)method_getImplementation(m1);
+            method_setImplementation(m1, (IMP)new_willEnterForeground);
         }
-    });
+        
+        Method m2 = class_getInstanceMethod(appDelegate, @selector(_applicationDidBecomeActive:));
+        if (m2) {
+            orig_didBecomeActive = (void *)method_getImplementation(m2);
+            method_setImplementation(m2, (IMP)new_didBecomeActive);
+        }
+    }
 }
