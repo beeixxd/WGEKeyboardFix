@@ -1,52 +1,42 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static BOOL g_logicOverrideActive = NO;
+static BOOL g_appJustBecameActive = NO;
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    if (g_logicOverrideActive) {
-        return NO;
+    if (g_appJustBecameActive) {
+        UIEvent *currentEvent = nil;
+        id UIApplicationClass = objc_getClass("UIApplication");
+        if (UIApplicationClass) {
+            id sharedApp = [UIApplicationClass performSelector:@selector(sharedInstance)];
+            if (sharedApp && [sharedApp respondsToSelector:@selector(currentEvent)]) {
+                currentEvent = [sharedApp performSelector:@selector(currentEvent)];
+            }
+        }
+        
+        if (!currentEvent || currentEvent.type != UIEventTypeTouches) {
+            return NO;
+        }
     }
     return orig_becomeFirstResponder(self, _cmd);
 }
 
-static void (*orig_makeKeyWindow)(id, SEL);
-static void new_makeKeyWindow(id self, SEL _cmd) {
-    if (g_logicOverrideActive) {
-        return;
-    }
-    orig_makeKeyWindow(self, _cmd);
-}
-
-static void (*orig_becomeKeyWindow)(id, SEL) ;
-static void new_becomeKeyWindow(id self, SEL _cmd) {
-    if (g_logicOverrideActive) {
-        return;
-    }
-    orig_becomeKeyWindow(self, _cmd);
-}
-
-static void performIronCladCleanup(void) {
+static void forceDismissKeyboard(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
-        
+        UIWindow *keyWindow = nil;
         NSArray *windows = [[UIApplication sharedApplication] windows];
         for (UIWindow *window in windows) {
-            NSString *name = NSStringFromClass([window class]);
-            if ([name containsString:@"TextEffects"] || [name containsString:@"Keyboard"]) {
-                window.hidden = YES;
-                window.alpha = 0.0;
-                
-                NSArray *subviews = [window subviews];
-                for (UIView *subview in subviews) {
-                    NSString *subName = NSStringFromClass([subview class]);
-                    if ([subName containsString:@"Dimming"] || [subName containsString:@"Shadow"] || [subName containsString:@"Corner"]) {
-                        subview.hidden = YES;
-                        [subview removeFromSuperview];
-                    }
-                }
+            if (window.isKeyWindow) {
+                keyWindow = window;
+                break;
             }
+        }
+        if (!keyWindow && windows.count > 0) {
+            keyWindow = [windows firstObject];
+        }
+        if (keyWindow) {
+            [keyWindow endEditing:YES];
         }
     });
 }
@@ -69,19 +59,6 @@ static void performIronCladCleanup(void) {
             method_setImplementation(m1, (IMP)new_becomeFirstResponder);
         }
         
-        Class windowClass = [UIWindow class];
-        Method m2 = class_getInstanceMethod(windowClass, @selector(makeKeyWindow));
-        if (m2) {
-            orig_makeKeyWindow = (void *)method_getImplementation(m2);
-            method_setImplementation(m2, (IMP)new_makeKeyWindow);
-        }
-        
-        Method m3 = class_getInstanceMethod(windowClass, @selector(becomeKeyWindow));
-        if (m3) {
-            orig_becomeKeyWindow = (void *)method_getImplementation(m3);
-            method_setImplementation(m3, (IMP)new_becomeKeyWindow);
-        }
-        
         [[NSNotificationCenter defaultCenter] addObserver:observer
                                                  selector:@selector(triggerOverrideMode)
                                                      name:UIApplicationWillEnterForegroundNotification
@@ -95,17 +72,17 @@ static void performIronCladCleanup(void) {
 }
 
 - (void)triggerOverrideMode {
-    g_logicOverrideActive = YES;
-    performIronCladCleanup();
+    g_appJustBecameActive = YES;
+    forceDismissKeyboard();
     
-    for (int i = 1; i <= 6; i++) {
+    for (int i = 1; i <= 4; i++) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            performIronCladCleanup();
+            forceDismissKeyboard();
         });
     }
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.6 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        g_logicOverrideActive = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_appJustBecameActive = NO;
     });
 }
 
