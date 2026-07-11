@@ -2,24 +2,26 @@
 #import <objc/runtime.h>
 
 static BOOL g_appJustBecameActive = NO;
+static BOOL g_isUserTouching = NO;
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
     if (g_appJustBecameActive) {
-        UIEvent *currentEvent = nil;
-        id UIApplicationClass = objc_getClass("UIApplication");
-        if (UIApplicationClass) {
-            id sharedApp = [UIApplicationClass performSelector:@selector(sharedInstance)];
-            if (sharedApp && [sharedApp respondsToSelector:@selector(currentEvent)]) {
-                currentEvent = [sharedApp performSelector:@selector(currentEvent)];
-            }
-        }
-        
-        if (!currentEvent || currentEvent.type != UIEventTypeTouches) {
+        if (!g_isUserTouching) {
             return NO;
         }
     }
     return orig_becomeFirstResponder(self, _cmd);
+}
+
+static void (*orig_touchesBegan)(id, SEL, NSSet *, UIEvent *);
+static void new_touchesBegan(id self, SEL _cmd, NSSet *touches, UIEvent *event) {
+    g_isUserTouching = YES;
+    orig_touchesBegan(self, _cmd, touches, event);
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_isUserTouching = NO;
+    });
 }
 
 static void forceDismissKeyboard(void) {
@@ -59,6 +61,12 @@ static void forceDismissKeyboard(void) {
             method_setImplementation(m1, (IMP)new_becomeFirstResponder);
         }
         
+        Method m2 = class_getInstanceMethod(viewClass, @selector(touchesBegan:withEvent:));
+        if (m2) {
+            orig_touchesBegan = (void *)method_getImplementation(m2);
+            method_setImplementation(m2, (IMP)new_touchesBegan);
+        }
+        
         [[NSNotificationCenter defaultCenter] addObserver:observer
                                                  selector:@selector(triggerOverrideMode)
                                                      name:UIApplicationWillEnterForegroundNotification
@@ -73,6 +81,7 @@ static void forceDismissKeyboard(void) {
 
 - (void)triggerOverrideMode {
     g_appJustBecameActive = YES;
+    g_isUserTouching = NO;
     forceDismissKeyboard();
     
     for (int i = 1; i <= 4; i++) {
