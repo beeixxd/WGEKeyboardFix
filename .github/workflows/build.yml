@@ -5,33 +5,23 @@ on:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode
+      - name: Manual Setup Theos
         run: |
-          sudo xcode-select -s /Applications/Xcode_15.0.1.app/Contents/Developer
-
-      - name: Setup Theos
-        run: |
-          bash -c "$(curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/install-theos)"
-          echo "THEOS=~/theos" >> $GITHUB_ENV
-
-      - name: Setup SDK & Toolchain
-        run: |
+          git clone --recursive https://github.com/theos/theos.git ~/theos
           mkdir -p ~/theos/sdks
           curl -LO https://github.com/theos/sdks/raw/master/iPhoneOS14.5.sdk.tar.xz
           tar -xf iPhoneOS14.5.sdk.tar.xz -C ~/theos/sdks/
           rm iPhoneOS14.5.sdk.tar.xz
-          export HOMEBREW_NO_REQUIRE_TAP_TRUST=1
-          brew install dpkg xz lz4
 
       - name: Build Rootful
         env:
-          THEOS: ~/theos
+          THEOS: /Users/runner/theos
         run: |
           make clean
           make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootful
@@ -41,7 +31,7 @@ jobs:
 
       - name: Build Rootless
         env:
-          THEOS: ~/theos
+          THEOS: /Users/runner/theos
         run: |
           make clean
           make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
@@ -49,7 +39,7 @@ jobs:
 
       - name: Build Roothide
         env:
-          THEOS: ~/theos
+          THEOS: /Users/runner/theos
         run: |
           make clean
           make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=roothide
