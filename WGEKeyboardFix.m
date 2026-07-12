@@ -29,7 +29,7 @@ static void WGERunFullCleanup(void) {
         return;
     }
     
-    // 只要不是在解锁页，就全局无死角注销第一响应者（光标）
+    // 如果已经解锁进入首页，全局无条件强制撤销所有光标响应
     if (!gWGEIsAppLockScreenShowing) {
         [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     }
@@ -42,30 +42,35 @@ static void WGERunFullCleanup(void) {
             continue;
         }
 
-        // 如果已经成功进入首页
+        BOOL isKeyboardWindow = [windowClassName containsString:@"TextEffects"] || [windowClassName containsString:@"Keyboard"];
+
         if (!gWGEIsAppLockScreenShowing) {
-            if ([windowClassName containsString:@"TextEffects"] || [windowClassName containsString:@"Keyboard"]) {
-                // 不只是改frame，直接把整个键盘载体窗口的隐藏和透明度锁死，从根源断绝任何阴影图层的渲染空间
+            // 【核心重置】如果已经在首页，针对键盘宿主窗口进行毁灭性拦截
+            if (isKeyboardWindow) {
                 w.hidden = YES;
                 w.alpha = 0.0;
                 CGRect frame = w.frame;
                 frame.size.height = 0;
                 w.frame = frame;
+                // 强制让它的 rootViewController 放弃响应
+                [w.rootViewController.view endEditing:YES];
             }
         } else {
-            // 如果在解锁页，且当前并没有真正弹起键盘（高度很小或为0），说明这是卡死的残影窗口，将其隐形
-            if (([windowClassName containsString:@"TextEffects"] || [windowClassName containsString:@"Keyboard"]) && w.frame.size.height < 100) {
+            // 如果还在解锁页，但键盘窗口高度为0或极低，说明是卡死的假阴影窗口，将其隐形
+            if (isKeyboardWindow && w.frame.size.height < 100) {
                 w.alpha = 0.0;
             }
         }
 
-        // 针对图层级别的特殊清理
+        // 【最关键的深度消杀】遍历键盘窗口内部的所有子视图（阴影、遮罩、背景）
+        // 系统之所以能显示阴影，是因为这些子视图还活着。我们直接把它们物理移除！
         for (UIView *subview in [w subviews]) {
             NSString *subName = NSStringFromClass([subview class]);
             if ([subName containsString:@"Dimming"] || 
                 [subName containsString:@"Shadow"] || 
                 [subName containsString:@"Corner"] ||
-                [subName containsString:@"Keyboard"]) { // 把带有Keyboard关键字的非Window子视图也纳入消杀
+                [subName containsString:@"Keyboard"] ||
+                [subName containsString:@"Background"]) { 
                 
                 if (!gWGEIsAppLockScreenShowing) {
                     subview.hidden = YES;
@@ -73,6 +78,8 @@ static void WGERunFullCleanup(void) {
                     CGRect frame = subview.frame;
                     frame.size.height = 0;
                     subview.frame = frame;
+                    
+                    // 彻底从图层树里拔掉，不给系统留任何做“渐隐动画”的物质基础
                     [subview removeFromSuperview];
                 }
             }
@@ -82,14 +89,17 @@ static void WGERunFullCleanup(void) {
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
+    // 1. 如果解锁页正在显示，绿灯放行，保证能自动聚焦弹键盘
     if (gWGEIsAppLockScreenShowing) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
+    // 2. 锁屏或转场状态，直接放行系统
     if (gWGEAppIsLockedState || gWGEAppTransitionActive) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
+    // 3. 已经在首页了，只要不是用户纯手动点击触发的，一律拦截并清理
     if (!gWGEUserIsInteracting) {
         WGERunFullCleanup();
         return NO;
@@ -114,7 +124,10 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 static void (*orig_viewWillDisappear)(id, SEL, BOOL);
 static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
     orig_viewWillDisappear(self, _cmd, animated);
-    WGERunFullCleanup();
+    // 只要有页面消失，顺手清一下，查漏补缺
+    if (!gWGEIsAppLockScreenShowing) {
+        WGERunFullCleanup();
+    }
 }
 
 @interface WGEKeyboardUltimatePerfectFixer : NSObject
@@ -149,7 +162,6 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
             method_setImplementation(m3, (IMP)new_viewWillDisappear);
         }
         
-        // 【已修复编译错误】移除了多余的赋值符号
         NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
         [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
         [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
@@ -159,6 +171,7 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
         [center addObserver:fixer selector:@selector(keyboardWillShowOrHide) name:UIKeyboardWillShowNotification object:nil];
         [center addObserver:fixer selector:@selector(keyboardWillShowOrHide) name:UIKeyboardDidHideNotification object:nil];
         
+        // 核心：监听解锁成功的信号
         [center addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
     });
 }
@@ -184,16 +197,18 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
 }
 
 - (void)onAppUnlockSuccess {
+    // 1. 瞬间关闭特权，转为首页最高防御防弹状态
     gWGEIsAppLockScreenShowing = NO;
     
-    // 强制让当前整个App所有输入框不论在哪，立刻吐出焦点，确保解锁页面的 textField 在被销毁前，先安全地退弹键盘
+    // 2. 立即斩断全App的光标第一响应者
     [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     
-    // 紧接着配合超高频、长时间跨度的立体式消杀，彻底粉碎转场动画期间由于图层残留导致的各种恶心阴影
+    // 3. 首次强力拔除阴影
     WGERunFullCleanup();
     
+    // 4. 在接下来的 0.5 秒转场黄金期内，进行持续密集的五连环地毯式消杀（彻底粉碎任何系统延迟创建的渐变阴影图层）
     for (int i = 1; i <= 5; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             WGERunFullCleanup();
         });
     }
