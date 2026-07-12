@@ -1,7 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static BOOL g_isInteractingWithScreen = NO;
 static BOOL g_isAppTransitionActive = NO;
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
@@ -9,24 +8,36 @@ static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
     if (g_isAppTransitionActive) {
         return NO;
     }
-    if (!g_isInteractingWithScreen) {
+    
+    BOOL isProgrammatic = YES;
+    id appClass = objc_getClass("UIApplication");
+    if (appClass) {
+        id sharedApp = [appClass performSelector:@selector(sharedInstance)];
+        if (sharedApp) {
+            SEL currentEventSel = objc_getSelector("currentEvent");
+            if ([sharedApp respondsToSelector:currentEventSel]) {
+                NSMethodSignature *sig = [sharedApp methodSignatureForSelector:currentEventSel];
+                if (sig) {
+                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                    [inv setSelector:currentEventSel];
+                    [inv setTarget:sharedApp];
+                    [inv invoke];
+                    __unsafe_unretained UIEvent *currentEvent = nil;
+                    [inv getReturnValue:&currentEvent];
+                    
+                    if (currentEvent && currentEvent.type == UIEventTypeTouches) {
+                        isProgrammatic = NO;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (isProgrammatic) {
         return NO;
     }
+    
     return orig_becomeFirstResponder(self, _cmd);
-}
-
-static void (*orig_touchesBegan)(id, SEL, NSSet *, UIEvent *);
-static void new_touchesBegan(id self, SEL _cmd, NSSet *touches, UIEvent *event) {
-    g_isInteractingWithScreen = YES;
-    orig_touchesBegan(self, _cmd, touches, event);
-}
-
-static void (*orig_touchesEnded)(id, SEL, NSSet *, UIEvent *);
-static void new_touchesEnded(id self, SEL _cmd, NSSet *touches, UIEvent *event) {
-    orig_touchesEnded(self, _cmd, touches, event);
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        g_isInteractingWithScreen = NO;
-    });
 }
 
 static void (*orig_viewWillDisappear)(id, SEL, BOOL);
@@ -37,7 +48,6 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
 
 static void executeIronCladCleanup(void) {
     g_isAppTransitionActive = YES;
-    g_isInteractingWithScreen = NO;
     
     dispatch_async(dispatch_get_main_queue(), ^{
         [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
@@ -86,18 +96,6 @@ static void releaseTransitionShield(void) {
             method_setImplementation(m1, (IMP)new_becomeFirstResponder);
         }
         
-        Method m2 = class_getInstanceMethod(viewClass, @selector(touchesBegan:withEvent:));
-        if (m2) {
-            orig_touchesBegan = (void *)method_getImplementation(m2);
-            method_setImplementation(m2, (IMP)new_touchesBegan);
-        }
-        
-        Method m3 = class_getInstanceMethod(viewClass, @selector(touchesEnded:withEvent:));
-        if (m3) {
-            orig_touchesEnded = (void *)method_getImplementation(m3);
-            method_setImplementation(m3, (IMP)new_touchesEnded);
-        }
-        
         Class vcClass = [UIViewController class];
         Method m4 = class_getInstanceMethod(vcClass, @selector(viewWillDisappear:));
         if (m4) {
@@ -122,11 +120,11 @@ static void releaseTransitionShield(void) {
 - (void)onUnlockOrActive {
     executeIronCladCleanup();
     for (int i = 1; i <= 5; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.06 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             executeIronCladCleanup();
         });
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         releaseTransitionShield();
     });
 }
