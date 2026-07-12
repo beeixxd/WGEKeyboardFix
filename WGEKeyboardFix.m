@@ -1,97 +1,91 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static BOOL g_appJustBecameActive = NO;
-static BOOL g_isUserTouching = NO;
+static BOOL g_autoFocusShieldActive = NO;
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    if (g_appJustBecameActive) {
-        if (!g_isUserTouching) {
-            return NO;
-        }
+    if (g_autoFocusShieldActive) {
+        return NO;
     }
     return orig_becomeFirstResponder(self, _cmd);
 }
 
-static void (*orig_touchesBegan)(id, SEL, NSSet *, UIEvent *);
-static void new_touchesBegan(id self, SEL _cmd, NSSet *touches, UIEvent *event) {
-    g_isUserTouching = YES;
-    orig_touchesBegan(self, _cmd, touches, event);
+static void applyShieldAndClean(void) {
+    g_autoFocusShieldActive = YES;
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        g_isUserTouching = NO;
-    });
-}
-
-static void forceDismissKeyboard(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
-        UIWindow *keyWindow = nil;
+        [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
+        
         NSArray *windows = [[UIApplication sharedApplication] windows];
         for (UIWindow *window in windows) {
-            if (window.isKeyWindow) {
-                keyWindow = window;
-                break;
+            NSString *name = NSStringFromClass([window class]);
+            if ([name containsString:@"TextEffects"] || [name containsString:@"Keyboard"]) {
+                window.hidden = YES;
+                window.alpha = 0.0;
+                
+                NSArray *subviews = [window subviews];
+                for (UIView *subview in subviews) {
+                    NSString *subName = NSStringFromClass([subview class]);
+                    if ([subName containsString:@"Dimming"] || [subName containsString:@"Shadow"] || [subName containsString:@"Corner"]) {
+                        subview.hidden = YES;
+                        [subview removeFromSuperview];
+                    }
+                }
             }
         }
-        if (!keyWindow && windows.count > 0) {
-            keyWindow = [windows firstObject];
-        }
-        if (keyWindow) {
-            [keyWindow endEditing:YES];
-        }
     });
 }
 
-@interface WGEKeyboardOverrideObserver : NSObject
+static void releaseShield(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        g_autoFocusShieldActive = NO;
+    });
+}
+
+@interface WGEKeyboardUltimateFixer : NSObject
 @end
 
-@implementation WGEKeyboardOverrideObserver
+@implementation WGEKeyboardUltimateFixer
 
 + (void)load {
-    static WGEKeyboardOverrideObserver *observer = nil;
+    static WGEKeyboardUltimateFixer *fixer = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        observer = [[WGEKeyboardOverrideObserver alloc] init];
+        fixer = [[WGEKeyboardUltimateFixer alloc] init];
         
         Class viewClass = [UIView class];
-        Method m1 = class_getInstanceMethod(viewClass, @selector(becomeFirstResponder));
-        if (m1) {
-            orig_becomeFirstResponder = (void *)method_getImplementation(m1);
-            method_setImplementation(m1, (IMP)new_becomeFirstResponder);
+        Method m = class_getInstanceMethod(viewClass, @selector(becomeFirstResponder));
+        if (m) {
+            orig_becomeFirstResponder = (void *)method_getImplementation(m);
+            method_setImplementation(m, (IMP)new_becomeFirstResponder);
         }
         
-        Method m2 = class_getInstanceMethod(viewClass, @selector(touchesBegan:withEvent:));
-        if (m2) {
-            orig_touchesBegan = (void *)method_getImplementation(m2);
-            method_setImplementation(m2, (IMP)new_touchesBegan);
-        }
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
         
-        [[NSNotificationCenter defaultCenter] addObserver:observer
-                                                 selector:@selector(triggerOverrideMode)
-                                                     name:UIApplicationWillEnterForegroundNotification
-                                                   object:nil];
-                                                   
-        [[NSNotificationCenter defaultCenter] addObserver:observer
-                                                 selector:@selector(triggerOverrideMode)
-                                                     name:UIApplicationDidBecomeActiveNotification
-                                                   object:nil];
+        [center addObserver:fixer selector:@selector(handleLockOrBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+        [center addObserver:fixer selector:@selector(handleLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
+        
+        [center addObserver:fixer selector:@selector(handleUnlockOrActive) name:UIApplicationWillEnterForegroundNotification object:nil];
+        [center addObserver:fixer selector:@selector(handleUnlockOrActive) name:UIApplicationDidBecomeActiveNotification object:nil];
     });
 }
 
-- (void)triggerOverrideMode {
-    g_appJustBecameActive = YES;
-    g_isUserTouching = NO;
-    forceDismissKeyboard();
+- (void)handleLockOrBackground {
+    applyShieldAndClean();
+}
+
+- (void)handleUnlockOrActive {
+    applyShieldAndClean();
     
-    for (int i = 1; i <= 4; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.08 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            forceDismissKeyboard();
+    for (int i = 1; i <= 5; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.06 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            applyShieldAndClean();
         });
     }
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        g_appJustBecameActive = NO;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        releaseShield();
     });
 }
 
