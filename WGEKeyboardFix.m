@@ -1,9 +1,8 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
-#import <objc/message.h>
 
 static BOOL gWGEPasscodeRecentlyShown = NO;
-static Class gWGEKeyboardCornerViewClass = Nil;
+static BOOL gWGEAppTransitionActive = NO;
 
 static NSArray<UIWindow *> *WGEAllWindows(void) {
     NSMutableArray<UIWindow *> *result = [NSMutableArray array];
@@ -23,100 +22,28 @@ static NSArray<UIWindow *> *WGEAllWindows(void) {
     return result;
 }
 
-static UIWindow *WGEKeyWindow(void) {
-    for (UIWindow *w in WGEAllWindows()) {
-        if (w.isKeyWindow) return w;
-    }
-    return [UIApplication sharedApplication].keyWindow;
-}
-
-static void WGEPostSyntheticKeyboardHide(void) {
-    CGRect screenBounds = [UIScreen mainScreen].bounds;
-    CGRect endFrame = CGRectMake(0, screenBounds.size.height, screenBounds.size.width, 0);
-    NSValue *frameValue = [NSValue valueWithCGRect:endFrame];
-    NSDictionary *userInfo = @{
-        UIKeyboardFrameBeginUserInfoKey: frameValue,
-        UIKeyboardFrameEndUserInfoKey: frameValue,
-        UIKeyboardAnimationDurationUserInfoKey: @(0.25),
-        UIKeyboardAnimationCurveUserInfoKey: @(UIViewAnimationCurveEaseInOut),
-        UIKeyboardIsLocalUserInfoKey: @YES,
-    };
-    [[NSNotificationCenter defaultCenter] postNotificationName:UIKeyboardWillHideNotification
-                                                          object:nil
-                                                        userInfo:userInfo];
-    [[NSNotificationCenter defaultCenter] postNotificationName:UIKeyboardDidHideNotification
-                                                          object:nil
-                                                        userInfo:userInfo];
-}
-
-static void WGEHideLeftoverPasscodeWindows(void) {
-    UIWindow *keyWindow = WGEKeyWindow();
-    for (UIWindow *w in WGEAllWindows()) {
-        if (w == keyWindow) continue;
-        if (w.isHidden) continue;
-
-        NSMutableArray<UIViewController *> *chain = [NSMutableArray array];
-        UIViewController *vc = w.rootViewController;
-        if (vc) [chain addObject:vc];
-        while (vc.presentedViewController) {
-            vc = vc.presentedViewController;
-            [chain addObject:vc];
-        }
-
-        BOOL isPasscodeWindow = NO;
-        for (UIViewController *candidate in chain) {
-            NSString *className = NSStringFromClass([candidate class]);
-            if ([className rangeOfString:@"Passcode"].location != NSNotFound) {
-                isPasscodeWindow = YES;
-                break;
-            }
-        }
-
-        NSString *windowClassName = NSStringFromClass([w class]);
-        if ([windowClassName rangeOfString:@"Passcode"].location != NSNotFound) {
-            isPasscodeWindow = YES;
-        }
-
-        if (isPasscodeWindow) {
-            w.hidden = YES;
-        }
-    }
-}
-
-static void WGEHideKeyboardCornerViews(UIView *root) {
-    if (!root) return;
-    if (gWGEKeyboardCornerViewClass && [root isKindOfClass:gWGEKeyboardCornerViewClass]) {
-        root.hidden = YES;
-        root.alpha = 0.0;
-    } else {
-        NSString *className = NSStringFromClass([root class]);
-        if ([className rangeOfString:@"KeyboardDropShadow"].location != NSNotFound) {
-            root.hidden = YES;
-            [root removeFromSuperview];
-        }
-    }
-    for (UIView *subview in root.subviews) {
-        WGEHideKeyboardCornerViews(subview);
-    }
-}
-
 static void WGERunFullCleanup(void) {
-    [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder)
-                                                to:nil
-                                              from:nil
-                                          forEvent:nil];
+    [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
 
     for (UIWindow *w in WGEAllWindows()) {
         [w endEditing:YES];
-        WGEHideKeyboardCornerViews(w);
+        
+        NSString *windowClassName = NSStringFromClass([w class]);
+        if ([windowClassName rangeOfString:@"Passcode"].location != NSNotFound) {
+            w.hidden = YES;
+        }
+
+        for (UIView *subview in [w subviews]) {
+            NSString *subName = NSStringFromClass([subview class]);
+            if ([subName containsString:@"Dimming"] || 
+                [subName containsString:@"Shadow"] || 
+                [subName containsString:@"Corner"] || 
+                [subName containsString:@"Keyboard"]) {
+                subview.hidden = YES;
+                [subview removeFromSuperview];
+            }
+        }
     }
-
-    WGEHideLeftoverPasscodeWindows();
-    WGEPostSyntheticKeyboardHide();
-
-    UIWindow *keyWindow = WGEKeyWindow();
-    [keyWindow setNeedsLayout];
-    [keyWindow layoutIfNeeded];
 }
 
 static void WGEScheduleCleanup(NSTimeInterval delay) {
@@ -126,19 +53,41 @@ static void WGEScheduleCleanup(NSTimeInterval delay) {
     });
 }
 
+static BOOL (*orig_becomeFirstResponder)(id, SEL);
+static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
+    NSString *className = NSStringFromClass([self class]);
+    
+    if ([className containsString:@"Passcode"] || 
+        [className containsString:@"PIN"] || 
+        [className containsString:@"Secure"] || 
+        [className containsString:@"Password"] || 
+        [className containsString:@"Field"]) {
+        return orig_becomeFirstResponder(self, _cmd);
+    }
+    
+    if (gWGEAppTransitionActive) {
+        return NO;
+    }
+    
+    return orig_becomeFirstResponder(self, _cmd);
+}
+
+static void (*orig_viewWillDisappear)(id, SEL, BOOL);
+static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
+    orig_viewWillDisappear(self, _cmd, animated);
+    [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
+}
+
 static IMP gOrigPasscodeViewWillDisappear = NULL;
 static IMP gOrigPasscodeViewDidAppear = NULL;
-static IMP gOrigKeyboardCornerInitWithFrame = NULL;
-static IMP gOrigKeyboardCornerLayoutSubviews = NULL;
-static IMP gOrigKeyboardCornerSetHidden = NULL;
-static IMP gOrigKeyboardCornerSetAlpha = NULL;
-static IMP gOrigViewDidAddSubview = NULL;
 
 static void WGEPasscodeViewWillDisappear(id self, SEL _cmd, BOOL animated) {
     if (gOrigPasscodeViewWillDisappear) {
         ((void (*)(id, SEL, BOOL))gOrigPasscodeViewWillDisappear)(self, _cmd, animated);
     }
     gWGEPasscodeRecentlyShown = YES;
+    gWGEAppTransitionActive = YES;
+    WGEScheduleCleanup(0.05);
     WGEScheduleCleanup(0.15);
 }
 
@@ -149,56 +98,6 @@ static void WGEPasscodeViewDidAppear(id self, SEL _cmd, BOOL animated) {
     gWGEPasscodeRecentlyShown = YES;
 }
 
-static id WGEKeyboardCornerInitWithFrame(UIView *self, SEL _cmd, CGRect frame) {
-    UIView *result = self;
-    if (gOrigKeyboardCornerInitWithFrame) {
-        result = ((id (*)(id, SEL, CGRect))gOrigKeyboardCornerInitWithFrame)(self, _cmd, frame);
-    }
-    if (result) {
-        result.alpha = 0.0;
-        result.hidden = YES;
-        result.userInteractionEnabled = NO;
-    }
-    return result;
-}
-
-static void WGEKeyboardCornerLayoutSubviews(UIView *self, SEL _cmd) {
-    if (gOrigKeyboardCornerLayoutSubviews) {
-        ((void (*)(id, SEL))gOrigKeyboardCornerLayoutSubviews)(self, _cmd);
-    }
-    self.alpha = 0.0;
-    self.hidden = YES;
-}
-
-static void WGEKeyboardCornerSetHidden(UIView *self, SEL _cmd, BOOL hidden) {
-    if (gOrigKeyboardCornerSetHidden) {
-        ((void (*)(id, SEL, BOOL))gOrigKeyboardCornerSetHidden)(self, _cmd, YES);
-    }
-}
-
-static void WGEKeyboardCornerSetAlpha(UIView *self, SEL _cmd, CGFloat alpha) {
-    if (gOrigKeyboardCornerSetAlpha) {
-        ((void (*)(id, SEL, CGFloat))gOrigKeyboardCornerSetAlpha)(self, _cmd, 0.0);
-    }
-}
-
-static void WGEViewDidAddSubview(UIView *self, SEL _cmd, UIView *subview) {
-    if (gOrigViewDidAddSubview) {
-        ((void (*)(id, SEL, UIView *))gOrigViewDidAddSubview)(self, _cmd, subview);
-    }
-    if (!subview) return;
-    if (gWGEKeyboardCornerViewClass && [subview isKindOfClass:gWGEKeyboardCornerViewClass]) {
-        subview.hidden = YES;
-        subview.alpha = 0.0;
-        return;
-    }
-    NSString *className = NSStringFromClass([subview class]);
-    if ([className rangeOfString:@"KeyboardDropShadow"].location != NSNotFound) {
-        subview.hidden = YES;
-        [subview removeFromSuperview];
-    }
-}
-
 static void WGESwizzleInstanceMethod(Class cls, SEL selector, IMP replacement, IMP *originalOut) {
     if (!cls) return;
     Method method = class_getInstanceMethod(cls, selector);
@@ -207,39 +106,63 @@ static void WGESwizzleInstanceMethod(Class cls, SEL selector, IMP replacement, I
     method_setImplementation(method, replacement);
 }
 
-__attribute__((constructor))
-static void WGEKeyboardFixInit(void) {
-    Class passcodeClass = NSClassFromString(@"_TtC10PasscodeUI23PasscodeEntryController");
-    if (passcodeClass) {
-        WGESwizzleInstanceMethod(passcodeClass, @selector(viewWillDisappear:),
-                                  (IMP)WGEPasscodeViewWillDisappear, &gOrigPasscodeViewWillDisappear);
-        WGESwizzleInstanceMethod(passcodeClass, @selector(viewDidAppear:),
-                                  (IMP)WGEPasscodeViewDidAppear, &gOrigPasscodeViewDidAppear);
-    }
+@interface WGEKeyboardUltimatePerfectFixer : NSObject
+@end
 
-    gWGEKeyboardCornerViewClass = NSClassFromString(@"UIKeyboardCornerView");
-    if (gWGEKeyboardCornerViewClass) {
-        WGESwizzleInstanceMethod(gWGEKeyboardCornerViewClass, @selector(initWithFrame:),
-                                  (IMP)WGEKeyboardCornerInitWithFrame, &gOrigKeyboardCornerInitWithFrame);
-        WGESwizzleInstanceMethod(gWGEKeyboardCornerViewClass, @selector(layoutSubviews),
-                                  (IMP)WGEKeyboardCornerLayoutSubviews, &gOrigKeyboardCornerLayoutSubviews);
-        WGESwizzleInstanceMethod(gWGEKeyboardCornerViewClass, @selector(setHidden:),
-                                  (IMP)WGEKeyboardCornerSetHidden, &gOrigKeyboardCornerSetHidden);
-        WGESwizzleInstanceMethod(gWGEKeyboardCornerViewClass, @selector(setAlpha:),
-                                  (IMP)WGEKeyboardCornerSetAlpha, &gOrigKeyboardCornerSetAlpha);
-    }
+@implementation WGEKeyboardUltimatePerfectFixer
 
-    WGESwizzleInstanceMethod([UIView class], @selector(didAddSubview:),
-                              (IMP)WGEViewDidAddSubview, &gOrigViewDidAddSubview);
-
-    [[NSNotificationCenter defaultCenter] addObserverForName:UIApplicationDidBecomeActiveNotification
-                                                        object:nil
-                                                         queue:[NSOperationQueue mainQueue]
-                                                    usingBlock:^(NSNotification * _Nonnull note) {
-        if (gWGEPasscodeRecentlyShown) {
-            gWGEPasscodeRecentlyShown = NO;
-            WGEScheduleCleanup(0.05);
-            WGEScheduleCleanup(0.35);
++ (void)load {
+    static WGEKeyboardUltimatePerfectFixer *fixer = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        fixer = [[WGEKeyboardUltimatePerfectFixer alloc] init];
+        
+        Class viewClass = [UIView class];
+        Method m1 = class_getInstanceMethod(viewClass, @selector(becomeFirstResponder));
+        if (m1) {
+            orig_becomeFirstResponder = (void *)method_getImplementation(m1);
+            method_setImplementation(m1, (IMP)new_becomeFirstResponder);
         }
-    }];
+        
+        Class vcClass = [UIViewController class];
+        Method m2 = class_getInstanceMethod(vcClass, @selector(viewWillDisappear:));
+        if (m2) {
+            orig_viewWillDisappear = (void *)method_getImplementation(m2);
+            method_setImplementation(m2, (IMP)new_viewWillDisappear);
+        }
+        
+        Class passcodeClass = NSClassFromString(@"_TtC10PasscodeUI23PasscodeEntryController");
+        if (passcodeClass) {
+            WGESwizzleInstanceMethod(passcodeClass, @selector(viewWillDisappear:),
+                                      (IMP)WGEPasscodeViewWillDisappear, &gOrigPasscodeViewWillDisappear);
+            WGESwizzleInstanceMethod(passcodeClass, @selector(viewDidAppear:),
+                                      (IMP)WGEPasscodeViewDidAppear, &gOrigPasscodeViewDidAppear);
+        }
+        
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+        [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+        [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
+        [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationWillEnterForegroundNotification object:nil];
+        [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+    });
 }
+
+- (void)onLockOrBackground {
+    gWGEAppTransitionActive = YES;
+    WGERunFullCleanup();
+}
+
+- (void)onUnlockOrActive {
+    WGERunFullCleanup();
+    for (int i = 1; i <= 5; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            WGERunFullCleanup();
+        });
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        gWGEAppTransitionActive = NO;
+        gWGEPasscodeRecentlyShown = NO;
+    });
+}
+
+@end
