@@ -62,31 +62,7 @@ static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
         return NO;
     }
     
-    BOOL hasUserTouch = NO;
-    Class appClass = objc_getClass("UIApplication");
-    if (appClass) {
-        id sharedApp = [appClass performSelector:@selector(sharedInstance)];
-        if (sharedApp) {
-            SEL currentEventSel = objc_getSelector("currentEvent");
-            if ([sharedApp respondsToSelector:currentEventSel]) {
-                NSMethodSignature *sig = [sharedApp methodSignatureForSelector:currentEventSel];
-                if (sig) {
-                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                    [inv setSelector:currentEventSel];
-                    [inv setTarget:sharedApp];
-                    [inv invoke];
-                    __unsafe_unretained UIEvent *currentEvent = nil;
-                    [inv getReturnValue:&currentEvent];
-                    
-                    if (currentEvent && currentEvent.type == UIEventTypeTouches) {
-                        hasUserTouch = YES;
-                    }
-                }
-            }
-        }
-    }
-    
-    if (!hasUserTouch && !gWGEUserIsInteracting) {
+    if (!gWGEUserIsInteracting) {
         return NO;
     }
     
