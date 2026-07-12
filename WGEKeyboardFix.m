@@ -5,6 +5,10 @@ static BOOL gWGEAppTransitionActive = NO;
 static BOOL gWGEUserIsInteracting = NO;
 static BOOL gWGEAppIsLockedState = NO;
 
+// 【核心新增】标记应用当前是否正处于“展示解锁界面（FaceID/密码）”的状态
+// 当这个状态为 YES 时，允许代码自动拉起键盘，不进行任何拦截
+static BOOL gWGEIsAppLockScreenShowing = YES; 
+
 static NSArray<UIWindow *> *WGEAllWindows(void) {
     NSMutableArray<UIWindow *> *result = [NSMutableArray array];
     if (@available(iOS 13.0, *)) {
@@ -24,8 +28,8 @@ static NSArray<UIWindow *> *WGEAllWindows(void) {
 }
 
 static void WGERunFullCleanup(void) {
-    // 如果处于锁屏或者后台状态，绝对不要执行任何清理，避免误伤系统锁屏密码框
-    if (gWGEAppIsLockedState) {
+    // 如果处于系统锁屏状态，或者应用自身的解锁界面正在显示，绝对不要执行清理
+    if (gWGEAppIsLockedState || gWGEIsAppLockScreenShowing) {
         return;
     }
     
@@ -36,7 +40,7 @@ static void WGERunFullCleanup(void) {
         
         NSString *windowClassName = NSStringFromClass([w class]);
         
-        // 【核心修复】极大范围扩大白名单，锁屏密码窗口、系统安全窗口、远程输入法窗口一律放行
+        // 过滤系统安全与远程输入窗口
         if ([windowClassName rangeOfString:@"Passcode"].location != NSNotFound ||
             [windowClassName rangeOfString:@"Remote"].location != NSNotFound ||
             [windowClassName rangeOfString:@"Secure"].location != NSNotFound ||
@@ -70,12 +74,17 @@ static void WGERunFullCleanup(void) {
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    // 【核心修复】如果 App 处于锁屏或者正在切后台，说明当前是系统托管阶段，必须立刻原路放行，绝不拦截
+    // 1. 如果应用自身的解锁页面正在展示，无条件放行，允许代码自动聚焦拉起键盘
+    if (gWGEIsAppLockScreenShowing) {
+        return orig_becomeFirstResponder(self, _cmd);
+    }
+    
+    // 2. 如果处于系统层面的锁屏/切后台状态，原路放行
     if (gWGEAppIsLockedState || gWGEAppTransitionActive) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
-    // 只有在非用户直接触摸交互、且 App 处于正常前台时，才为了防止防弹键盘而清理
+    // 3. 正常业务状态下，如果没有用户触摸交互，则拦截并清理（防止无故乱弹键盘）
     if (!gWGEUserIsInteracting) {
         WGERunFullCleanup();
         return NO;
@@ -140,23 +149,35 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
         [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
         [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationWillEnterForegroundNotification object:nil];
         [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+        
+        // 监听应用自身解锁成功/收起的通知
+        [center addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
     });
 }
 
 - (void)onLockOrBackground {
     gWGEAppIsLockedState = YES;
     gWGEAppTransitionActive = YES;
-    // 【核心修复】锁屏时不要自作聪明去调用清理，完全让给系统，防止密码框被阉割
+    // 重新回到锁屏或后台时，重置应用解锁状态，以便下次进来时能再次自动拉起
+    gWGEIsAppLockScreenShowing = YES;
 }
 
 - (void)onUnlockOrActive {
-    // 【核心修复】舍弃以前高频循环调用 WGERunFullCleanup 的做法，改为延时 0.15 秒温和重置状态
-    // 给系统留出充足的从锁屏/后台返回并初始化 UI 的时间
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         gWGEAppTransitionActive = NO;
         gWGEAppIsLockedState = NO;
-        WGERunFullCleanup(); // 此时 App 已完全前台掌控，清理残留即可
+        WGERunFullCleanup(); 
     });
+}
+
+// 【核心新增】当用户成功通过 FaceID 或 密码解锁，进入首页时触发
+- (void)onAppUnlockSuccess {
+    // 1. 关闭解锁页面特权状态
+    gWGEIsAppLockScreenShowing = NO;
+    
+    // 2. 强行执行一次深度清理，把解锁页面的光标、键盘实体、动画阴影全部连根拔起
+    // 这样能确保进入首页时绝对是一张白纸，不会有任何键盘或残影自动弹起
+    WGERunFullCleanup();
 }
 
 @end
