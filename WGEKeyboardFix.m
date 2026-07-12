@@ -1,31 +1,25 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static BOOL g_isUserTouching = NO;
 static BOOL g_isAppTransitionActive = NO;
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
+    NSString *className = NSStringFromClass([self class]);
+    
+    if ([className containsString:@"Passcode"] || 
+        [className containsString:@"PIN"] || 
+        [className containsString:@"Secure"] || 
+        [className containsString:@"Password"] || 
+        [className containsString:@"Field"]) {
+        return orig_becomeFirstResponder(self, _cmd);
+    }
+    
     if (g_isAppTransitionActive) {
         return NO;
     }
-    if (!g_isUserTouching) {
-        return NO;
-    }
+    
     return orig_becomeFirstResponder(self, _cmd);
-}
-
-static void (*orig_windowSendEvent)(id, SEL, UIEvent *);
-static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
-    if (event && event.type == UIEventTypeTouches) {
-        g_isUserTouching = YES;
-    }
-    orig_windowSendEvent(self, _cmd, event);
-    if (event && event.type == UIEventTypeTouches) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            g_isUserTouching = NO;
-        });
-    }
 }
 
 static void (*orig_viewWillDisappear)(id, SEL, BOOL);
@@ -36,7 +30,6 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
 
 static void executeIronCladCleanup(void) {
     g_isAppTransitionActive = YES;
-    g_isUserTouching = NO;
     
     dispatch_async(dispatch_get_main_queue(), ^{
         [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
@@ -79,18 +72,11 @@ static void executeIronCladCleanup(void) {
             method_setImplementation(m1, (IMP)new_becomeFirstResponder);
         }
         
-        Class windowClass = [UIWindow class];
-        Method m2 = class_getInstanceMethod(windowClass, @selector(sendEvent:));
-        if (m2) {
-            orig_windowSendEvent = (void *)method_getImplementation(m2);
-            method_setImplementation(m2, (IMP)new_windowSendEvent);
-        }
-        
         Class vcClass = [UIViewController class];
-        Method m3 = class_getInstanceMethod(vcClass, @selector(viewWillDisappear:));
-        if (m3) {
-            orig_viewWillDisappear = (void *)method_getImplementation(m3);
-            method_setImplementation(m3, (IMP)new_viewWillDisappear);
+        Method m2 = class_getInstanceMethod(vcClass, @selector(viewWillDisappear:));
+        if (m2) {
+            orig_viewWillDisappear = (void *)method_getImplementation(m2);
+            method_setImplementation(m2, (IMP)new_viewWillDisappear);
         }
         
         NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
