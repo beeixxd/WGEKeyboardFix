@@ -3,6 +3,7 @@
 
 static BOOL gWGEAppTransitionActive = NO;
 static BOOL gWGEUserIsInteracting = NO;
+static BOOL gWGEAppIsLockedState = NO;
 
 static NSArray<UIWindow *> *WGEAllWindows(void) {
     NSMutableArray<UIWindow *> *result = [NSMutableArray array];
@@ -23,6 +24,10 @@ static NSArray<UIWindow *> *WGEAllWindows(void) {
 }
 
 static void WGERunFullCleanup(void) {
+    if (gWGEAppIsLockedState) {
+        return;
+    }
+    
     [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
 
     for (UIWindow *w in WGEAllWindows()) {
@@ -30,7 +35,7 @@ static void WGERunFullCleanup(void) {
         
         NSString *windowClassName = NSStringFromClass([w class]);
         if ([windowClassName rangeOfString:@"Passcode"].location != NSNotFound) {
-            w.hidden = YES;
+            continue;
         }
 
         if ([windowClassName containsString:@"TextEffects"] || [windowClassName containsString:@"Keyboard"]) {
@@ -59,13 +64,7 @@ static void WGERunFullCleanup(void) {
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    NSString *className = NSStringFromClass([self class]);
-    
-    if ([className containsString:@"Passcode"] || 
-        [className containsString:@"PIN"] || 
-        [className containsString:@"Secure"] || 
-        [className containsString:@"Password"] || 
-        [className containsString:@"Field"]) {
+    if (gWGEAppIsLockedState) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
@@ -137,6 +136,7 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
 }
 
 - (void)onLockOrBackground {
+    gWGEAppIsLockedState = YES;
     gWGEAppTransitionActive = YES;
     WGERunFullCleanup();
 }
@@ -150,6 +150,7 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         gWGEAppTransitionActive = NO;
+        gWGEAppIsLockedState = NO;
     });
 }
 
