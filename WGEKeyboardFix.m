@@ -1,7 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
-static BOOL gWGEPasscodeRecentlyShown = NO;
 static BOOL gWGEAppTransitionActive = NO;
 
 static NSArray<UIWindow *> *WGEAllWindows(void) {
@@ -46,27 +45,45 @@ static void WGERunFullCleanup(void) {
     }
 }
 
-static void WGEScheduleCleanup(NSTimeInterval delay) {
-    dispatch_time_t when = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC));
-    dispatch_after(when, dispatch_get_main_queue(), ^{
-        WGERunFullCleanup();
-    });
-}
-
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    NSString *className = NSStringFromClass([self class]);
-    
-    if ([className containsString:@"Passcode"] || 
-        [className containsString:@"PIN"] || 
-        [className containsString:@"Secure"] || 
-        [className containsString:@"Password"] || 
-        [className containsString:@"Field"]) {
-        return orig_becomeFirstResponder(self, _cmd);
-    }
-    
     if (gWGEAppTransitionActive) {
         return NO;
+    }
+    
+    BOOL hasUserTouch = NO;
+    Class appClass = objc_getClass("UIApplication");
+    if (appClass) {
+        id sharedApp = [appClass performSelector:@selector(sharedInstance)];
+        if (sharedApp) {
+            SEL currentEventSel = objc_getSelector("currentEvent");
+            if ([sharedApp respondsToSelector:currentEventSel]) {
+                NSMethodSignature *sig = [sharedApp methodSignatureForSelector:currentEventSel];
+                if (sig) {
+                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                    [inv setSelector:currentEventSel];
+                    [inv setTarget:sharedApp];
+                    [inv invoke];
+                    __unsafe_unretained UIEvent *currentEvent = nil;
+                    [inv getReturnValue:&currentEvent];
+                    
+                    if (currentEvent && currentEvent.type == UIEventTypeTouches) {
+                        hasUserTouch = YES;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (!hasUserTouch) {
+        NSString *className = NSStringFromClass([self class]);
+        if (!([className containsString:@"Passcode"] || 
+              [className containsString:@"PIN"] || 
+              [className containsString:@"Secure"] || 
+              [className containsString:@"Password"] || 
+              [className containsString:@"Field"])) {
+            return NO;
+        }
     }
     
     return orig_becomeFirstResponder(self, _cmd);
@@ -76,34 +93,6 @@ static void (*orig_viewWillDisappear)(id, SEL, BOOL);
 static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
     orig_viewWillDisappear(self, _cmd, animated);
     [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
-}
-
-static IMP gOrigPasscodeViewWillDisappear = NULL;
-static IMP gOrigPasscodeViewDidAppear = NULL;
-
-static void WGEPasscodeViewWillDisappear(id self, SEL _cmd, BOOL animated) {
-    if (gOrigPasscodeViewWillDisappear) {
-        ((void (*)(id, SEL, BOOL))gOrigPasscodeViewWillDisappear)(self, _cmd, animated);
-    }
-    gWGEPasscodeRecentlyShown = YES;
-    gWGEAppTransitionActive = YES;
-    WGEScheduleCleanup(0.05);
-    WGEScheduleCleanup(0.15);
-}
-
-static void WGEPasscodeViewDidAppear(id self, SEL _cmd, BOOL animated) {
-    if (gOrigPasscodeViewDidAppear) {
-        ((void (*)(id, SEL, BOOL))gOrigPasscodeViewDidAppear)(self, _cmd, animated);
-    }
-    gWGEPasscodeRecentlyShown = YES;
-}
-
-static void WGESwizzleInstanceMethod(Class cls, SEL selector, IMP replacement, IMP *originalOut) {
-    if (!cls) return;
-    Method method = class_getInstanceMethod(cls, selector);
-    if (!method) return;
-    *originalOut = method_getImplementation(method);
-    method_setImplementation(method, replacement);
 }
 
 @interface WGEKeyboardUltimatePerfectFixer : NSObject
@@ -131,14 +120,6 @@ static void WGESwizzleInstanceMethod(Class cls, SEL selector, IMP replacement, I
             method_setImplementation(m2, (IMP)new_viewWillDisappear);
         }
         
-        Class passcodeClass = NSClassFromString(@"_TtC10PasscodeUI23PasscodeEntryController");
-        if (passcodeClass) {
-            WGESwizzleInstanceMethod(passcodeClass, @selector(viewWillDisappear:),
-                                      (IMP)WGEPasscodeViewWillDisappear, &gOrigPasscodeViewWillDisappear);
-            WGESwizzleInstanceMethod(passcodeClass, @selector(viewDidAppear:),
-                                      (IMP)WGEPasscodeViewDidAppear, &gOrigPasscodeViewDidAppear);
-        }
-        
         NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
         [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
         [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
@@ -154,14 +135,13 @@ static void WGESwizzleInstanceMethod(Class cls, SEL selector, IMP replacement, I
 
 - (void)onUnlockOrActive {
     WGERunFullCleanup();
-    for (int i = 1; i <= 5; i++) {
+    for (int i = 1; i <= 6; i++) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             WGERunFullCleanup();
         });
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         gWGEAppTransitionActive = NO;
-        gWGEPasscodeRecentlyShown = NO;
     });
 }
 
