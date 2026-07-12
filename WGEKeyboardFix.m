@@ -33,6 +33,14 @@ static void WGERunFullCleanup(void) {
             w.hidden = YES;
         }
 
+        if ([windowClassName containsString:@"TextEffects"] || [windowClassName containsString:@"Keyboard"]) {
+            w.hidden = YES;
+            w.alpha = 0.0;
+            CGRect frame = w.frame;
+            frame.size.height = 0;
+            w.frame = frame;
+        }
+
         for (UIView *subview in [w subviews]) {
             NSString *subName = NSStringFromClass([subview class]);
             if ([subName containsString:@"Dimming"] || 
@@ -40,6 +48,9 @@ static void WGERunFullCleanup(void) {
                 [subName containsString:@"Corner"] || 
                 [subName containsString:@"Keyboard"]) {
                 subview.hidden = YES;
+                CGRect frame = subview.frame;
+                frame.size.height = 0;
+                subview.frame = frame;
                 [subview removeFromSuperview];
             }
         }
@@ -58,11 +69,8 @@ static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
-    if (gWGEAppTransitionActive) {
-        return NO;
-    }
-    
-    if (!gWGEUserIsInteracting) {
+    if (gWGEAppTransitionActive || !gWGEUserIsInteracting) {
+        WGERunFullCleanup();
         return NO;
     }
     
@@ -85,7 +93,7 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 static void (*orig_viewWillDisappear)(id, SEL, BOOL);
 static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
     orig_viewWillDisappear(self, _cmd, animated);
-    [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
+    WGERunFullCleanup();
 }
 
 @interface WGEKeyboardUltimatePerfectFixer : NSObject
