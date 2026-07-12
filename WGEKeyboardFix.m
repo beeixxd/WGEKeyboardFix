@@ -126,7 +126,6 @@ static void WGEScheduleCleanup(NSTimeInterval delay) {
     });
 }
 
-static IMP gOrigPasscodeDealloc = NULL;
 static IMP gOrigPasscodeViewWillDisappear = NULL;
 static IMP gOrigPasscodeViewDidAppear = NULL;
 static IMP gOrigKeyboardCornerInitWithFrame = NULL;
@@ -134,15 +133,6 @@ static IMP gOrigKeyboardCornerLayoutSubviews = NULL;
 static IMP gOrigKeyboardCornerSetHidden = NULL;
 static IMP gOrigKeyboardCornerSetAlpha = NULL;
 static IMP gOrigViewDidAddSubview = NULL;
-
-static void WGEPasscodeDealloc(id self, SEL _cmd) {
-    gWGEPasscodeRecentlyShown = YES;
-    WGEScheduleCleanup(0.05);
-    WGEScheduleCleanup(0.35);
-    if (gOrigPasscodeDealloc) {
-        ((void (*)(id, SEL))gOrigPasscodeDealloc)(self, _cmd);
-    }
-}
 
 static void WGEPasscodeViewWillDisappear(id self, SEL _cmd, BOOL animated) {
     if (gOrigPasscodeViewWillDisappear) {
@@ -221,8 +211,6 @@ __attribute__((constructor))
 static void WGEKeyboardFixInit(void) {
     Class passcodeClass = NSClassFromString(@"_TtC10PasscodeUI23PasscodeEntryController");
     if (passcodeClass) {
-        WGESwizzleInstanceMethod(passcodeClass, sel_registerName("dealloc"),
-                                  (IMP)WGEPasscodeDealloc, &gOrigPasscodeDealloc);
         WGESwizzleInstanceMethod(passcodeClass, @selector(viewWillDisappear:),
                                   (IMP)WGEPasscodeViewWillDisappear, &gOrigPasscodeViewWillDisappear);
         WGESwizzleInstanceMethod(passcodeClass, @selector(viewDidAppear:),
