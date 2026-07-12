@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 
+static BOOL g_isUserTouching = NO;
 static BOOL g_isAppTransitionActive = NO;
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
@@ -8,36 +9,23 @@ static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
     if (g_isAppTransitionActive) {
         return NO;
     }
-    
-    BOOL isProgrammatic = YES;
-    id appClass = objc_getClass("UIApplication");
-    if (appClass) {
-        id sharedApp = [appClass performSelector:@selector(sharedInstance)];
-        if (sharedApp) {
-            SEL currentEventSel = objc_getSelector("currentEvent");
-            if ([sharedApp respondsToSelector:currentEventSel]) {
-                NSMethodSignature *sig = [sharedApp methodSignatureForSelector:currentEventSel];
-                if (sig) {
-                    NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
-                    [inv setSelector:currentEventSel];
-                    [inv setTarget:sharedApp];
-                    [inv invoke];
-                    __unsafe_unretained UIEvent *currentEvent = nil;
-                    [inv getReturnValue:&currentEvent];
-                    
-                    if (currentEvent && currentEvent.type == UIEventTypeTouches) {
-                        isProgrammatic = NO;
-                    }
-                }
-            }
-        }
-    }
-    
-    if (isProgrammatic) {
+    if (!g_isUserTouching) {
         return NO;
     }
-    
     return orig_becomeFirstResponder(self, _cmd);
+}
+
+static void (*orig_windowSendEvent)(id, SEL, UIEvent *);
+static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
+    if (event && event.type == UIEventTypeTouches) {
+        g_isUserTouching = YES;
+    }
+    orig_windowSendEvent(self, _cmd, event);
+    if (event && event.type == UIEventTypeTouches) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            g_isUserTouching = NO;
+        });
+    }
 }
 
 static void (*orig_viewWillDisappear)(id, SEL, BOOL);
@@ -48,6 +36,7 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
 
 static void executeIronCladCleanup(void) {
     g_isAppTransitionActive = YES;
+    g_isUserTouching = NO;
     
     dispatch_async(dispatch_get_main_queue(), ^{
         [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
@@ -72,12 +61,6 @@ static void executeIronCladCleanup(void) {
     });
 }
 
-static void releaseTransitionShield(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        g_isAppTransitionActive = NO;
-    });
-}
-
 @interface WGEKeyboardPerfectFixer : NSObject
 @end
 
@@ -96,11 +79,18 @@ static void releaseTransitionShield(void) {
             method_setImplementation(m1, (IMP)new_becomeFirstResponder);
         }
         
+        Class windowClass = [UIWindow class];
+        Method m2 = class_getInstanceMethod(windowClass, @selector(sendEvent:));
+        if (m2) {
+            orig_windowSendEvent = (void *)method_getImplementation(m2);
+            method_setImplementation(m2, (IMP)new_windowSendEvent);
+        }
+        
         Class vcClass = [UIViewController class];
-        Method m4 = class_getInstanceMethod(vcClass, @selector(viewWillDisappear:));
-        if (m4) {
-            orig_viewWillDisappear = (void *)method_getImplementation(m4);
-            method_setImplementation(m4, (IMP)new_viewWillDisappear);
+        Method m3 = class_getInstanceMethod(vcClass, @selector(viewWillDisappear:));
+        if (m3) {
+            orig_viewWillDisappear = (void *)method_getImplementation(m3);
+            method_setImplementation(m3, (IMP)new_viewWillDisappear);
         }
         
         NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
@@ -124,8 +114,8 @@ static void releaseTransitionShield(void) {
             executeIronCladCleanup();
         });
     }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        releaseTransitionShield();
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        g_isAppTransitionActive = NO;
     });
 }
 
