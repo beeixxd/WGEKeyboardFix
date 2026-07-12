@@ -22,7 +22,7 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
     }
     orig_windowSendEvent(self, _cmd, event);
     if (event && event.type == UIEventTypeTouches) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             g_isUserTouching = NO;
         });
     }
