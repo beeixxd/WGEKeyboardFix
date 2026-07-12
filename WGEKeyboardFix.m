@@ -29,7 +29,7 @@ static void WGERunFullCleanup(void) {
         return;
     }
     
-    // 【核心改动】只要不是在解锁页，就全全局无死角注销第一响应者（光标）
+    // 只要不是在解锁页，就全局无死角注销第一响应者（光标）
     if (!gWGEIsAppLockScreenShowing) {
         [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     }
@@ -45,7 +45,7 @@ static void WGERunFullCleanup(void) {
         // 如果已经成功进入首页
         if (!gWGEIsAppLockScreenShowing) {
             if ([windowClassName containsString:@"TextEffects"] || [windowClassName containsString:@"Keyboard"]) {
-                // 【终极重拳】不只是改frame，直接把整个键盘载体窗口的隐藏和透明度锁死，从根源断绝任何阴影图层的渲染空间
+                // 不只是改frame，直接把整个键盘载体窗口的隐藏和透明度锁死，从根源断绝任何阴影图层的渲染空间
                 w.hidden = YES;
                 w.alpha = 0.0;
                 CGRect frame = w.frame;
@@ -149,7 +149,8 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
             method_setImplementation(m3, (IMP)new_viewWillDisappear);
         }
         
-        NSNotificationCenter *center = defaultCenter = [NSNotificationCenter defaultCenter];
+        // 【已修复编译错误】移除了多余的赋值符号
+        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
         [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
         [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
         [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationWillEnterForegroundNotification object:nil];
@@ -185,8 +186,7 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
 - (void)onAppUnlockSuccess {
     gWGEIsAppLockScreenShowing = NO;
     
-    // 【核心修复】在清空状态的同时，强制让当前整个App所有输入框不论在哪，立刻吐出焦点
-    // 这样做可以确保解锁页面的 textField 在被销毁前，先安全地退弹键盘
+    // 强制让当前整个App所有输入框不论在哪，立刻吐出焦点，确保解锁页面的 textField 在被销毁前，先安全地退弹键盘
     [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     
     // 紧接着配合超高频、长时间跨度的立体式消杀，彻底粉碎转场动画期间由于图层残留导致的各种恶心阴影
