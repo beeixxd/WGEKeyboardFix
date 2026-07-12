@@ -24,6 +24,7 @@ static NSArray<UIWindow *> *WGEAllWindows(void) {
 }
 
 static void WGERunFullCleanup(void) {
+    // 如果处于锁屏或者后台状态，绝对不要执行任何清理，避免误伤系统锁屏密码框
     if (gWGEAppIsLockedState) {
         return;
     }
@@ -34,7 +35,12 @@ static void WGERunFullCleanup(void) {
         [w endEditing:YES];
         
         NSString *windowClassName = NSStringFromClass([w class]);
-        if ([windowClassName rangeOfString:@"Passcode"].location != NSNotFound) {
+        
+        // 【核心修复】极大范围扩大白名单，锁屏密码窗口、系统安全窗口、远程输入法窗口一律放行
+        if ([windowClassName rangeOfString:@"Passcode"].location != NSNotFound ||
+            [windowClassName rangeOfString:@"Remote"].location != NSNotFound ||
+            [windowClassName rangeOfString:@"Secure"].location != NSNotFound ||
+            [windowClassName rangeOfString:@"Alert"].location != NSNotFound) {
             continue;
         }
 
@@ -64,11 +70,13 @@ static void WGERunFullCleanup(void) {
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    if (gWGEAppIsLockedState) {
+    // 【核心修复】如果 App 处于锁屏或者正在切后台，说明当前是系统托管阶段，必须立刻原路放行，绝不拦截
+    if (gWGEAppIsLockedState || gWGEAppTransitionActive) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
-    if (gWGEAppTransitionActive || !gWGEUserIsInteracting) {
+    // 只有在非用户直接触摸交互、且 App 处于正常前台时，才为了防止防弹键盘而清理
+    if (!gWGEUserIsInteracting) {
         WGERunFullCleanup();
         return NO;
     }
@@ -138,19 +146,16 @@ static void new_viewWillDisappear(id self, SEL _cmd, BOOL animated) {
 - (void)onLockOrBackground {
     gWGEAppIsLockedState = YES;
     gWGEAppTransitionActive = YES;
-    WGERunFullCleanup();
+    // 【核心修复】锁屏时不要自作聪明去调用清理，完全让给系统，防止密码框被阉割
 }
 
 - (void)onUnlockOrActive {
-    WGERunFullCleanup();
-    for (int i = 1; i <= 6; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            WGERunFullCleanup();
-        });
-    }
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.4 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    // 【核心修复】舍弃以前高频循环调用 WGERunFullCleanup 的做法，改为延时 0.15 秒温和重置状态
+    // 给系统留出充足的从锁屏/后台返回并初始化 UI 的时间
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         gWGEAppTransitionActive = NO;
         gWGEAppIsLockedState = NO;
+        WGERunFullCleanup(); // 此时 App 已完全前台掌控，清理残留即可
     });
 }
 
