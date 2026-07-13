@@ -69,7 +69,7 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
             [center addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
             
             gWGEGuardWindow = [[UIWindow alloc] initWithFrame:CGRectZero];
-            gWGEGuardWindow.windowLevel = UIWindowLevelNormal - 1.0;
+            gWGEGuardWindow.windowLevel = -1.0;
             gWGEGuardWindow.hidden = YES;
             
             gWGEGuardField = [[UITextField alloc] initWithFrame:CGRectZero];
