@@ -1,22 +1,8 @@
 #import <UIKit/UIKit.h>
 
-@interface WGEKeyboardUltimatePerfectFixer : NSObject
-@end
+static id gWGEFixerNotificationObserver = nil;
 
-@implementation WGEKeyboardUltimatePerfectFixer
-
-+ (void)load {
-    static WGEKeyboardUltimatePerfectFixer *fixer = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        fixer = [[WGEKeyboardUltimatePerfectFixer alloc] init];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[NSNotificationCenter defaultCenter] addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
-        });
-    });
-}
-
-- (void)onAppUnlockSuccess {
+static void WGEAppUnlockScreenDidDismissHandler(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIApplication *app = [UIApplication sharedApplication];
         id window = nil;
@@ -59,4 +45,13 @@
     });
 }
 
-@end
+__attribute__((constructor)) static void initializeWGEKeyboardFixerPlugin(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [[NSNotificationCenter defaultCenter] addObserverForName:@"WGEAppUnlockScreenDidDismissNotification"
+                                                          object:nil
+                                                           queue:[NSOperationQueue mainQueue]
+                                                      usingBlock:^(NSNotification * _Nonnull note) {
+            WGEAppUnlockScreenDidDismissHandler(NULL, NULL, NULL, NULL, NULL);
+        }];
+    });
+}
