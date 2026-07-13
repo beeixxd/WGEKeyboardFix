@@ -59,8 +59,7 @@ static void WGERunFullCleanup(void) {
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    NSString *className = NSStringFromClass([self class]);
-    if ([className containsString:@"GuardTextField"] || gWGEIsAppLockScreenShowing) {
+    if (gWGEIsAppLockScreenShowing) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
@@ -146,7 +145,12 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
         UITextField *guardField = [[UITextField alloc] initWithFrame:CGRectZero];
         guardField.hidden = YES;
         [keyWindow addSubview:guardField];
-        [guardField becomeFirstResponder];
+        
+        BOOL isShowingState = gWGEIsAppLockScreenShowing;
+        gWGEIsAppLockScreenShowing = YES;
+        orig_becomeFirstResponder(guardField, @selector(becomeFirstResponder));
+        gWGEIsAppLockScreenShowing = isShowingState;
+        
         [guardField resignFirstResponder];
         [guardField removeFromSuperview];
     }
