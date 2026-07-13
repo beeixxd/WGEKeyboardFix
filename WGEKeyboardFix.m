@@ -148,7 +148,7 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
         
         BOOL isShowingState = gWGEIsAppLockScreenShowing;
         gWGEIsAppLockScreenShowing = YES;
-        orig_becomeFirstResponder(guardField, @selector(becomeFirstResponder));
+        [guardField becomeFirstResponder];
         gWGEIsAppLockScreenShowing = isShowingState;
         
         [guardField resignFirstResponder];
