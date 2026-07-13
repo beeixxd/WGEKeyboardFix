@@ -1,16 +1,15 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
+#import <QuartzCore/QuartzCore.h>
 
 static BOOL gWGEAppTransitionActive = NO;
 static BOOL gWGEUserIsInteracting = NO;
 static BOOL gWGEAppIsLockedState = NO;
 static BOOL gWGEIsAppLockScreenShowing = YES;
-static UIWindow *gWGEGuardWindow = nil;
-static UITextField *gWGEGuardField = nil;
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    if (gWGEIsAppLockScreenShowing || self == gWGEGuardField) {
+    if (gWGEIsAppLockScreenShowing) {
         return ((BOOL(*)(id, SEL))orig_becomeFirstResponder)(self, _cmd);
     }
     if (gWGEAppIsLockedState || gWGEAppTransitionActive) {
@@ -67,23 +66,6 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
             [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationWillEnterForegroundNotification object:nil];
             [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationDidBecomeActiveNotification object:nil];
             [center addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
-            
-            if (@available(iOS 13.0, *)) {
-                for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
-                    if ([scene isKindOfClass:NSClassFromString(@"UIWindowScene")]) {
-                        gWGEGuardWindow = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
-                        break;
-                    }
-                }
-            }
-            if (!gWGEGuardWindow) {
-                gWGEGuardWindow = [[UIWindow alloc] initWithFrame:CGRectZero];
-            }
-            gWGEGuardWindow.windowLevel = UIWindowLevelNormal - 1;
-            gWGEGuardWindow.hidden = YES;
-            
-            gWGEGuardField = [[UITextField alloc] initWithFrame:CGRectZero];
-            [gWGEGuardWindow addSubview:gWGEGuardField];
         });
     });
 }
@@ -102,26 +84,38 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 }
 
 - (void)onAppUnlockSuccess {
-    UIWindow *previousKeyWindow = [UIApplication sharedApplication].keyWindow;
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
     
-    if (gWGEGuardWindow && gWGEGuardField) {
-        gWGEGuardWindow.hidden = NO;
-        [gWGEGuardWindow makeKeyWindow];
-        [gWGEGuardField becomeFirstResponder];
-        [gWGEGuardField resignFirstResponder];
-        gWGEGuardWindow.hidden = YES;
-    }
+    [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     
-    if (previousKeyWindow) {
-        [previousKeyWindow makeKeyWindow];
-        [previousKeyWindow endEditing:YES];
-    }
-    
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        gWGEIsAppLockScreenShowing = NO;
-        if (previousKeyWindow) {
-            [previousKeyWindow endEditing:YES];
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:NSClassFromString(@"UIWindowScene")]) continue;
+            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                [w endEditing:YES];
+            }
         }
+    } else {
+        [[UIApplication sharedApplication].keyWindow endEditing:YES];
+    }
+    
+    [CATransaction commit];
+    
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        gWGEIsAppLockScreenShowing = NO;
+        
+        [CATransaction begin];
+        [CATransaction setDisableActions:YES];
+        if (@available(iOS 13.0, *)) {
+            for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                if (![scene isKindOfClass:NSClassFromString(@"UIWindowScene")]) continue;
+                for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                    [w endEditing:YES];
+                }
+            }
+        }
+        [CATransaction commit];
     });
 }
 
