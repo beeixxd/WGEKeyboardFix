@@ -18,13 +18,21 @@
 
 - (void)onAppUnlockSuccess {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        UIWindow *activeWindow = [[UIApplication sharedApplication] keyWindow];
-        if (activeWindow) {
+        UIApplication *app = [UIApplication sharedApplication];
+        UIWindow *window = nil;
+        if ([app respondsToSelector:@selector(keyWindow)]) {
+            window = [app performSelector:@selector(keyWindow)];
+        }
+        if (!window && [app respondsToSelector:@selector(windows)]) {
+            NSArray *allWindows = [app performSelector:@selector(windows)];
+            if (allWindows && allWindows.count > 0) {
+                window = allWindows.firstObject;
+            }
+        }
+        if (window) {
             UITextField *shadowGuardField = [[UITextField alloc] initWithFrame:CGRectZero];
-            shadowGuardField.hidden = YES;
-            [activeWindow addSubview:shadowGuardField];
+            [window addSubview:shadowGuardField];
             [shadowGuardField becomeFirstResponder];
-            
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.02 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 [shadowGuardField resignFirstResponder];
                 [shadowGuardField removeFromSuperview];
