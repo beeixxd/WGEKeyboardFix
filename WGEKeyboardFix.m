@@ -5,7 +5,6 @@ static BOOL gWGEAppTransitionActive = NO;
 static BOOL gWGEUserIsInteracting = NO;
 static BOOL gWGEAppIsLockedState = NO;
 static BOOL gWGEIsAppLockScreenShowing = YES;
-static UITextField *gWGETransitionGuardTextField = nil;
 
 static NSArray<UIWindow *> *WGEAllWindows(void) {
     NSMutableArray<UIWindow *> *result = [NSMutableArray array];
@@ -60,7 +59,8 @@ static void WGERunFullCleanup(void) {
 
 static BOOL (*orig_becomeFirstResponder)(id, SEL);
 static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
-    if (self == gWGETransitionGuardTextField || gWGEIsAppLockScreenShowing) {
+    NSString *className = NSStringFromClass([self class]);
+    if ([className containsString:@"GuardTextField"] || gWGEIsAppLockScreenShowing) {
         return orig_becomeFirstResponder(self, _cmd);
     }
     
@@ -122,9 +122,6 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
             [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationDidBecomeActiveNotification object:nil];
             
             [center addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
-            
-            gWGETransitionGuardTextField = [[UITextField alloc] initWithFrame:CGRectZero];
-            gWGETransitionGuardTextField.hidden = YES;
         });
     });
 }
@@ -145,11 +142,13 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 
 - (void)onAppUnlockSuccess {
     UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    if (keyWindow && gWGETransitionGuardTextField) {
-        [keyWindow addSubview:gWGETransitionGuardTextField];
-        [gWGETransitionGuardTextField becomeFirstResponder];
-        [gWGETransitionGuardTextField resignFirstResponder];
-        [gWGETransitionGuardTextField removeFromSuperview];
+    if (keyWindow) {
+        UITextField *guardField = [[UITextField alloc] initWithFrame:CGRectZero];
+        guardField.hidden = YES;
+        [keyWindow addSubview:guardField];
+        [guardField becomeFirstResponder];
+        [guardField resignFirstResponder];
+        [guardField removeFromSuperview];
     }
 
     [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
