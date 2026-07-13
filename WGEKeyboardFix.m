@@ -43,28 +43,15 @@ static void WGERunFullCleanup(void) {
         BOOL isKeyboardWindow = [windowClassName containsString:@"TextEffects"] || [windowClassName containsString:@"Keyboard"];
         if (isKeyboardWindow) {
             if (!gWGEIsAppLockScreenShowing && !gWGEUserIsInteracting) {
+                w.hidden = YES;
+                w.alpha = 0.0;
                 for (UIView *subview in [w subviews]) {
-                    NSString *subName = NSStringFromClass([subview class]);
-                    if ([subName containsString:@"Container"] || [subName containsString:@"Background"] || [subName containsString:@"Target"] || [subName containsString:@"Effects"]) {
-                        subview.alpha = 0.0;
-                    }
+                    subview.hidden = YES;
+                    subview.alpha = 0.0;
                 }
             } else if (gWGEIsAppLockScreenShowing && w.frame.size.height < 100) {
                 w.alpha = 0.0;
             }
-        }
-    }
-}
-
-static void (*orig_layoutSubviews)(id, SEL);
-static void new_layoutSubviews(id self, SEL _cmd) {
-    orig_layoutSubviews(self, _cmd);
-    
-    if (!gWGEIsAppLockScreenShowing && !gWGEUserIsInteracting) {
-        NSString *className = NSStringFromClass([self class]);
-        if ([className containsString:@"UIKBBackgroundView"] || [className containsString:@"RenderConfig"] || [className containsString:@"Backdrop"]) {
-            ((UIView *)self).alpha = 0.0;
-            ((UIView *)self).hidden = YES;
         }
     }
 }
@@ -118,12 +105,6 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
             method_setImplementation(m1, (IMP)new_becomeFirstResponder);
         }
         
-        Method m_layout = class_getInstanceMethod(viewClass, @selector(layoutSubviews));
-        if (m_layout) {
-            orig_layoutSubviews = (void *)method_getImplementation(m_layout);
-            method_setImplementation(m_layout, (IMP)new_layoutSubviews);
-        }
-        
         Class windowClass = [UIWindow class];
         Method m2 = class_getInstanceMethod(windowClass, @selector(sendEvent:));
         if (m2) {
@@ -157,15 +138,11 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 
 - (void)onAppUnlockSuccess {
     [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
+    gWGEIsAppLockScreenShowing = NO;
     WGERunFullCleanup();
     
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        gWGEIsAppLockScreenShowing = NO;
-        WGERunFullCleanup();
-    });
-    
-    for (int i = 1; i <= 4; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    for (int i = 1; i <= 6; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             WGERunFullCleanup();
         });
     }
