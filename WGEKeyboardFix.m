@@ -89,13 +89,33 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 - (void)onAppUnlockSuccess {
     gWGEIsAppLockScreenShowing = NO;
     
-    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
-    [keyWindow endEditing:YES];
+    [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     
-    for (int i = 1; i <= 3; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            UIWindow *w = [UIApplication sharedApplication].keyWindow;
+    if (@available(iOS 13.0, *)) {
+        for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+            if (![scene isKindOfClass:NSClassFromString(@"UIWindowScene")]) continue;
+            for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                [w endEditing:YES];
+            }
+        }
+    } else {
+        [[UIApplication sharedApplication].keyWindow endEditing:YES];
+        for (UIWindow *w in [UIApplication sharedApplication].windows) {
             [w endEditing:YES];
+        }
+    }
+    
+    for (int i = 1; i <= 5; i++) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
+            if (@available(iOS 13.0, *)) {
+                for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
+                    if (![scene isKindOfClass:NSClassFromString(@"UIWindowScene")]) continue;
+                    for (UIWindow *w in ((UIWindowScene *)scene).windows) {
+                        [w endEditing:YES];
+                    }
+                }
+            }
         });
     }
 }
