@@ -87,8 +87,6 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 }
 
 - (void)onAppUnlockSuccess {
-    gWGEIsAppLockScreenShowing = NO;
-    
     [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
     
     if (@available(iOS 13.0, *)) {
@@ -105,8 +103,12 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
         }
     }
     
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        gWGEIsAppLockScreenShowing = NO;
+    });
+    
     for (int i = 1; i <= 5; i++) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((2 + i) * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
             [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
             if (@available(iOS 13.0, *)) {
                 for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
