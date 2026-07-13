@@ -1,6 +1,4 @@
 #import <UIKit/UIKit.h>
-#import <objc/runtime.h>
-#import <objc/message.h>
 
 @interface WGEKeyboardUltimatePerfectFixer : NSObject
 @end
@@ -21,7 +19,7 @@
 - (void)onAppUnlockSuccess {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         UIApplication *app = [UIApplication sharedApplication];
-        UIWindow *window = nil;
+        id window = nil;
         
         if ([app respondsToSelector:@selector(keyWindow)]) {
             window = [app performSelector:@selector(keyWindow)];
@@ -35,30 +33,26 @@
         }
         
         if (window) {
-            Class tfClass = objc_getClass("UITextField");
+            Class tfClass = NSClassFromString(@"UITextField");
             if (!tfClass) return;
             
             id shadowGuardField = [[tfClass alloc] init];
             if (!shadowGuardField) return;
             
-            if ([shadowGuardField respondsToSelector:@selector(setFrame:)]) {
-                ((void (*)(id, SEL, CGRect))objc_msgSend)(shadowGuardField, @selector(setFrame:), CGRectZero);
-            }
-            
             if ([window respondsToSelector:@selector(addSubview:)]) {
-                ((void (*)(id, SEL, id))objc_msgSend)(window, @selector(addSubview:), shadowGuardField);
+                [window performSelector:@selector(addSubview:) withObject:shadowGuardField];
             }
             
             if ([shadowGuardField respondsToSelector:@selector(becomeFirstResponder)]) {
-                ((BOOL (*)(id, SEL))objc_msgSend)(shadowGuardField, @selector(becomeFirstResponder));
+                [shadowGuardField performSelector:@selector(becomeFirstResponder)];
             }
             
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.02 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 if ([shadowGuardField respondsToSelector:@selector(resignFirstResponder)]) {
-                    ((BOOL (*)(id, SEL))objc_msgSend)(shadowGuardField, @selector(resignFirstResponder));
+                    [shadowGuardField performSelector:@selector(resignFirstResponder)];
                 }
                 if ([shadowGuardField respondsToSelector:@selector(removeFromSuperview)]) {
-                    ((void (*)(id, SEL))objc_msgSend)(shadowGuardField, @selector(removeFromSuperview));
+                    [shadowGuardField performSelector:@selector(removeFromSuperview)];
                 }
             });
         }
