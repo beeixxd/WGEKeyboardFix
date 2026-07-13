@@ -61,13 +61,15 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
             method_setImplementation(m2, (IMP)new_windowSendEvent);
         }
         
-        NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
-        [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
-        [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
-        [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationWillEnterForegroundNotification object:nil];
-        [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationDidBecomeActiveNotification object:nil];
-        
-        [center addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            NSNotificationCenter *center = [NSNotificationCenter defaultCenter];
+            [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationDidEnterBackgroundNotification object:nil];
+            [center addObserver:fixer selector:@selector(onLockOrBackground) name:UIApplicationWillResignActiveNotification object:nil];
+            [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationWillEnterForegroundNotification object:nil];
+            [center addObserver:fixer selector:@selector(onUnlockOrActive) name:UIApplicationDidBecomeActiveNotification object:nil];
+            
+            [center addObserver:fixer selector:@selector(onAppUnlockSuccess) name:@"WGEAppUnlockScreenDidDismissNotification" object:nil];
+        });
     });
 }
 
@@ -87,11 +89,13 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
 - (void)onAppUnlockSuccess {
     gWGEIsAppLockScreenShowing = NO;
     
-    [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
+    UIWindow *keyWindow = [UIApplication sharedApplication].keyWindow;
+    [keyWindow endEditing:YES];
     
     for (int i = 1; i <= 3; i++) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [[UIApplication sharedApplication] sendAction:@selector(resignFirstResponder) to:nil from:nil forEvent:nil];
+            UIWindow *w = [UIApplication sharedApplication].keyWindow;
+            [w endEditing:YES];
         });
     }
 }
