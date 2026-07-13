@@ -8,32 +8,46 @@ static BOOL gWGEIsAppLockScreenShowing = YES;
 static UIWindow *gWGEGuardWindow = nil;
 static UITextField *gWGEGuardField = nil;
 
-static BOOL (*orig_becomeFirstResponder)(id, SEL);
-static BOOL new_becomeFirstResponder(id self, SEL _cmd) {
+@interface UIView (WGEKeyboardFix)
+- (BOOL)wge_becomeFirstResponder;
+@end
+
+@implementation UIView (WGEKeyboardFix)
+
+- (BOOL)wge_becomeFirstResponder {
     if (gWGEIsAppLockScreenShowing || self == gWGEGuardField) {
-        return ((BOOL(*)(id, SEL))orig_becomeFirstResponder)(self, _cmd);
+        return [self wge_becomeFirstResponder];
     }
     if (gWGEAppIsLockedState || gWGEAppTransitionActive) {
-        return ((BOOL(*)(id, SEL))orig_becomeFirstResponder)(self, _cmd);
+        return [self wge_becomeFirstResponder];
     }
     if (!gWGEUserIsInteracting) {
         return NO;
     }
-    return ((BOOL(*)(id, SEL))orig_becomeFirstResponder)(self, _cmd);
+    return [self wge_becomeFirstResponder];
 }
 
-static void (*orig_windowSendEvent)(id, SEL, UIEvent *);
-static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
+@end
+
+@interface UIWindow (WGEKeyboardFix)
+- (void)wge_sendEvent:(UIEvent *)event;
+@end
+
+@implementation UIWindow (WGEKeyboardFix)
+
+- (void)wge_sendEvent:(UIEvent *)event {
     if (event && event.type == UIEventTypeTouches) {
         gWGEUserIsInteracting = YES;
     }
-    ((void(*)(id, SEL, UIEvent *))orig_windowSendEvent)(self, _cmd, event);
+    [self wge_sendEvent:event];
     if (event && event.type == UIEventTypeTouches) {
         dispatch_async(dispatch_get_main_queue(), ^{
             gWGEUserIsInteracting = NO;
         });
     }
 }
+
+@end
 
 @interface WGEKeyboardUltimatePerfectFixer : NSObject
 @end
@@ -48,16 +62,16 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
         
         Class viewClass = [UIView class];
         Method m1 = class_getInstanceMethod(viewClass, @selector(becomeFirstResponder));
-        if (m1) {
-            orig_becomeFirstResponder = (BOOL(*)(id, SEL))method_getImplementation(m1);
-            method_setImplementation(m1, (IMP)new_becomeFirstResponder);
+        Method m2 = class_getInstanceMethod(viewClass, @selector(wge_becomeFirstResponder));
+        if (m1 && m2) {
+            method_exchangeImplementations(m1, m2);
         }
         
         Class windowClass = [UIWindow class];
-        Method m2 = class_getInstanceMethod(windowClass, @selector(sendEvent:));
-        if (m2) {
-            orig_windowSendEvent = (void(*)(id, SEL, UIEvent *))method_getImplementation(m2);
-            method_setImplementation(m2, (IMP)new_windowSendEvent);
+        Method m3 = class_getInstanceMethod(windowClass, @selector(sendEvent:));
+        Method m4 = class_getInstanceMethod(windowClass, @selector(wge_sendEvent:));
+        if (m3 && m4) {
+            method_exchangeImplementations(m3, m4);
         }
         
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -97,7 +111,7 @@ static void new_windowSendEvent(id self, SEL _cmd, UIEvent *event) {
     if (gWGEGuardWindow && gWGEGuardField) {
         gWGEGuardWindow.hidden = NO;
         [gWGEGuardWindow makeKeyWindow];
-        ((BOOL(*)(id, SEL))orig_becomeFirstResponder)(gWGEGuardField, @selector(becomeFirstResponder));
+        [gWGEGuardField wge_becomeFirstResponder];
         [gWGEGuardField resignFirstResponder];
         gWGEGuardWindow.hidden = YES;
     }
